@@ -5,11 +5,28 @@ intelligence:
   causal_depth: 4             # how many layers deep to trace causes
 
 screening:
-  universe: "SP500"           # SP500, NASDAQ100, or ALL
-  max_candidates: 60          # stocks passing Stage 1 screener
+  universe: "GLOBAL"          # GLOBAL or US-only
+  regions:                    # comment out any region to exclude it
+    - US
+    - JAPAN
+    - KOREA
+    - TAIWAN
+    - CHINA
+    - INDIA
+    - AUSTRALIA
+    - UK
+    - GERMANY
+    - FRANCE
+    - NETHERLANDS
+    - SWITZERLAND
+    - SPAIN
+    - CANADA
+    - BRAZIL
+    - DENMARK
+  max_candidates: 80          # stocks passing Stage 1 screener (more universe = higher cap)
   max_deep_analyse: 20        # stocks getting full 4-agent treatment
-  min_market_cap_m: 500       # minimum market cap in millions
-  min_avg_volume: 500000      # minimum average daily volume
+  min_market_cap_m: 500       # minimum market cap in millions (USD equivalent)
+  min_avg_volume: 500000      # minimum average daily volume (halved for non-US automatically)
 
 horizons:
   quarter:   5                # top N picks per horizon
@@ -36,4 +53,4 @@ schedule:
   weekdays_only: true
 
 delivery:
-  method: terminal            # email | slack | terminal
+  method: email               # email | slack | terminal

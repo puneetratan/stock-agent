@@ -49,23 +49,46 @@ def _render_html(report: dict) -> str:
 
 
 def _deliver_email(report: dict) -> None:
-    sender = os.environ["SES_SENDER_EMAIL"]
+    sender    = os.environ["SES_SENDER_EMAIL"]
     recipient = os.environ["SES_RECIPIENT_EMAIL"]
-    run_date = report.get("generated_at", "")[:10]
+    run_date  = report.get("generated_at", "")[:10]
+    subject   = f"Stock Intelligence Report — {run_date}"
 
-    ses = boto3.client("ses", region_name=os.environ.get("AWS_REGION", "us-east-1"))
-    ses.send_email(
-        Source=sender,
-        Destination={"ToAddresses": [recipient]},
-        Message={
-            "Subject": {"Data": f"Stock Intelligence Report — {run_date}"},
-            "Body": {
-                "Html": {"Data": _render_html(report)},
-                "Text": {"Data": json.dumps(report, indent=2)},
+    # Use Gmail SMTP if credentials provided, otherwise fall back to SES
+    gmail_user = os.environ.get("GMAIL_USER")
+    gmail_pass = os.environ.get("GMAIL_APP_PASSWORD")
+
+    if gmail_user and gmail_pass:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        gmail_pass = "".join(c for c in gmail_pass if c.isascii()).replace(" ", "")
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = gmail_user
+        msg["To"]      = recipient
+        msg.attach(MIMEText(json.dumps(report, indent=2), "plain"))
+        msg.attach(MIMEText(_render_html(report), "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(gmail_user, gmail_pass)
+            server.sendmail(gmail_user, recipient, msg.as_string())
+        print(f"[delivery] Email sent via Gmail to {recipient}")
+    else:
+        ses = boto3.client("ses", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+        ses.send_email(
+            Source=sender,
+            Destination={"ToAddresses": [recipient]},
+            Message={
+                "Subject": {"Data": subject},
+                "Body": {
+                    "Html": {"Data": _render_html(report)},
+                    "Text": {"Data": json.dumps(report, indent=2)},
+                },
             },
-        },
-    )
-    print(f"[delivery] Email sent to {recipient}")
+        )
+        print(f"[delivery] Email sent via SES to {recipient}")
 
 
 def _deliver_slack(report: dict) -> None:

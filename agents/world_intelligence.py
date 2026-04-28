@@ -24,14 +24,17 @@ root causes behind surface narratives. Output precise structured intelligence.
 """
 
 _SYSTEM_PROMPT = """
-You are scanning today's world events to identify macro themes that will
-move markets. For each theme you identify:
+You are scanning today's world events across ALL global markets — US, Europe,
+Asia, India, Australia, Canada, Latin America, and Emerging Markets — to
+identify macro themes that will move markets globally.
 
+For each theme you identify:
 1. Assign a unique ID (SCREAMING_SNAKE_CASE)
 2. Rate urgency 1-10 (10 = market-moving today, 1 = slow-burn multi-year)
 3. Classify status: hot (actively escalating), warm (developing),
    cooling (resolving), new (just emerged)
-4. Provide 3-5 evidence headlines
+4. Tag affected_regions (e.g. ["ASIA", "EUROPE", "US", "GLOBAL"])
+5. Provide 3-5 evidence headlines
 
 OUTPUT STRICTLY as JSON matching this schema — no other text:
 {
@@ -41,13 +44,16 @@ OUTPUT STRICTLY as JSON matching this schema — no other text:
       "name": "Short descriptive name",
       "urgency": 8,
       "status": "hot",
+      "affected_regions": ["GLOBAL"],
       "summary": "2-3 sentence explanation of what is happening and why it matters",
       "evidence": ["headline1", "headline2", "headline3"]
     }
   ]
 }
 
-Identify 5-10 themes. Include both fast-moving events and structural shifts.
+Identify 8-12 themes covering: US macro, European outlook, Asian dynamics
+(China/Japan/Korea/India), commodity moves, currency shifts, and structural
+technology/geopolitical trends. Include both fast-moving events and slow burns.
 """
 
 
@@ -87,25 +93,47 @@ Identify and rank macro themes. Output only valid JSON.
         return Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False)
 
     def _fetch_news_context(self) -> str:
-        """Pull today's headlines to give the agent raw material."""
+        """Pull today's headlines from all major global regions."""
         try:
-            from tools.news_api import get_top_headlines, search_everything
-            headlines = get_top_headlines("business")
-            geopolitical = search_everything("geopolitical war conflict sanctions", days=2)
-            macro = search_everything("federal reserve inflation recession GDP", days=2)
+            from tools.news_api import get_global_headlines, search_everything
 
-            all_articles = headlines + geopolitical + macro
             context_lines = []
-            for a in all_articles[:12]:  # cap at 12 headlines to minimise token usage
-                title = a.get("title", "")
-                source = a.get("source", {}).get("name", "unknown") if isinstance(a.get("source"), dict) else "unknown"
-                published = a.get("publishedAt", "")[:10]
-                if title:
-                    context_lines.append(f"[{published}] {source}: {title}")
 
-            return "\n".join(context_lines)
+            # Regional headlines (US, UK, India, Japan, China, etc.)
+            regional = get_global_headlines()
+            for region, articles in regional.items():
+                for a in articles[:3]:  # 3 per region keeps tokens manageable
+                    title = a.get("title", "")
+                    if title and "[Removed]" not in title:
+                        published = a.get("publishedAt", "")[:10]
+                        context_lines.append(f"[{region}][{published}] {title}")
+
+            # Global topic searches (English only, but covers cross-border stories)
+            searches = [
+                ("geopolitical war conflict sanctions trade", 2),
+                ("federal reserve ECB BOJ central bank interest rates", 2),
+                ("China economy property tech regulation", 2),
+                ("India economy growth Modi", 2),
+                ("Europe energy recession inflation", 2),
+                ("emerging markets currency debt", 2),
+            ]
+            for query, days in searches:
+                for a in search_everything(query, days)[:3]:
+                    title = a.get("title", "")
+                    source = a.get("source", {}).get("name", "") if isinstance(a.get("source"), dict) else ""
+                    if title and "[Removed]" not in title:
+                        context_lines.append(f"[GLOBAL][{a.get('publishedAt','')[:10]}] {source}: {title}")
+
+            # Deduplicate and cap
+            seen, unique = set(), []
+            for line in context_lines:
+                if line not in seen:
+                    seen.add(line)
+                    unique.append(line)
+
+            return "\n".join(unique[:40])  # 40 headlines across all regions
         except Exception as e:
-            return f"News fetch error: {e}. Use your training knowledge for current macro context."
+            return f"News fetch error: {e}. Use your training knowledge for current global macro context."
 
     def _fetch_recent_themes(self) -> list[dict]:
         """Load previously detected themes so agent can track evolution."""

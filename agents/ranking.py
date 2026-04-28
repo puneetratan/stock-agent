@@ -92,13 +92,14 @@ Scores: fundamental: exceptional=90, high=75, average=50, poor=25
         sentiment: sentiment_score × 10
         geo: low_risk=80, medium_risk=60, high_risk=30, critical=10
 
-Output STRICTLY as JSON — no other text. Keep thesis fields to 1 sentence max:
+Output STRICTLY as JSON — no other text. Keep thesis fields to 1 sentence max.
+Include "region" and "exchange" on every pick (e.g. region: "JAPAN", exchange: "TSE"):
 {{
   "market_regime": {{"label": "string", "description": "1 sentence", "recommended_posture": "1 sentence"}},
   "causal_summary": "2-3 sentences max",
   "analyst_note": "2-3 sentences max",
   "horizons": {{
-    "quarter":   {{"picks": [{{"ticker": "X", "confidence": 80, "thesis": "1 sentence", "risks": ["r1"], "theme_ids": [], "is_contrarian": false, "technical_score": 80, "sentiment_score": 8.0, "fundamental_score": 85, "geo_score": 70}}], "avoid": [{{"ticker": "Y", "confidence": 70, "thesis": "1 sentence", "risks": []}}], "contrarian_picks": [{{"ticker": "Z", "confidence": 60, "thesis": "1 sentence", "risks": [], "is_contrarian": true}}]}},
+    "quarter":   {{"picks": [{{"ticker": "X", "region": "US", "exchange": "NASDAQ", "confidence": 80, "thesis": "1 sentence", "risks": ["r1"], "theme_ids": [], "is_contrarian": false, "technical_score": 80, "sentiment_score": 8.0, "fundamental_score": 85, "geo_score": 70}}], "avoid": [{{"ticker": "Y", "region": "US", "exchange": "NYSE", "confidence": 70, "thesis": "1 sentence", "risks": []}}], "contrarian_picks": [{{"ticker": "Z", "region": "JAPAN", "exchange": "TSE", "confidence": 60, "thesis": "1 sentence", "risks": [], "is_contrarian": true}}]}},
     "one_year":  {{"picks": [], "avoid": [], "contrarian_picks": []}},
     "two_year":  {{"picks": [], "avoid": [], "contrarian_picks": []}},
     "five_year": {{"picks": [], "avoid": [], "contrarian_picks": []}},

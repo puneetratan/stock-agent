@@ -18,6 +18,30 @@ def _signal_emoji(signal: str) -> str:
     return {"BUY": "🟢", "AVOID": "🔴", "HOLD": "🟡", "SELL": "🔴"}.get(signal.upper(), "⚪")
 
 
+_REGION_FLAG = {
+    "US":          "🇺🇸",
+    "UK":          "🇬🇧",
+    "GERMANY":     "🇩🇪",
+    "FRANCE":      "🇫🇷",
+    "NETHERLANDS": "🇳🇱",
+    "SWITZERLAND": "🇨🇭",
+    "SPAIN":       "🇪🇸",
+    "JAPAN":       "🇯🇵",
+    "KOREA":       "🇰🇷",
+    "TAIWAN":      "🇹🇼",
+    "CHINA":       "🇨🇳",
+    "INDIA":       "🇮🇳",
+    "AUSTRALIA":   "🇦🇺",
+    "CANADA":      "🇨🇦",
+    "BRAZIL":      "🇧🇷",
+    "DENMARK":     "🇩🇰",
+}
+
+def _region_badge(region: str) -> str:
+    flag = _REGION_FLAG.get(region.upper(), "🌍")
+    return f"{flag} {region.title()}"
+
+
 def _horizon_label(horizon: str) -> str:
     return {
         "quarter":   "Q2 2026 — Short Term",
@@ -103,6 +127,10 @@ def render_substack_html(report: dict) -> str:
                 thesis     = pick.get("thesis", "")
                 risks      = pick.get("risks", [])
                 themes     = pick.get("theme_ids", [])
+                region     = pick.get("region", "US")
+                exchange   = pick.get("exchange", "")
+                badge      = _region_badge(region)
+                exch_label = f" · {exchange}" if exchange else ""
 
                 lines.append(f"""
 <div style="border:1px solid #e0e0e0;border-radius:6px;padding:16px;
@@ -113,6 +141,7 @@ def render_substack_html(report: dict) -> str:
       {_confidence_bar(confidence)}
     </span>
   </div>
+  <p style="font-size:12px;color:#666;margin:2px 0 6px;">{badge}{exch_label}</p>
   <p style="font-size:14px;line-height:1.6;margin:8px 0 4px;">{thesis}</p>
   {"<p style='font-size:12px;color:#888;margin:4px 0;'>Themes: " + ", ".join(themes) + "</p>" if themes else ""}
   {"<p style='font-size:12px;color:#c0392b;margin:4px 0;'>⚠ " + " · ".join(risks) + "</p>" if risks else ""}
