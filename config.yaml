@@ -19,16 +19,16 @@ horizons:
   ten_year:  5
 
 models:
-  # Haiku for fast/simple agents, Sonnet for reasoning agents
-  orchestrator:  "anthropic.claude-3-5-sonnet-20241022-v2:0"
-  world:         "anthropic.claude-3-5-sonnet-20241022-v2:0"
-  causal:        "anthropic.claude-3-5-sonnet-20241022-v2:0"
-  screener:      "anthropic.claude-3-haiku-20240307-v1:0"
-  market:        "anthropic.claude-3-haiku-20240307-v1:0"
-  news:          "anthropic.claude-3-haiku-20240307-v1:0"
-  fundamentals:  "anthropic.claude-3-5-sonnet-20241022-v2:0"
-  geo:           "anthropic.claude-3-haiku-20240307-v1:0"
-  ranking:       "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  # Inference profile ARNs (required for on-demand invocation on Bedrock)
+  orchestrator:  "arn:aws:bedrock:us-east-1:597864876332:application-inference-profile/j0088oxmdngr"
+  world:         "arn:aws:bedrock:us-east-1:597864876332:application-inference-profile/j0088oxmdngr"
+  causal:        "arn:aws:bedrock:us-east-1:597864876332:application-inference-profile/j0088oxmdngr"
+  screener:      "arn:aws:bedrock:us-east-1:597864876332:application-inference-profile/mxh86uu7v257"
+  market:        "arn:aws:bedrock:us-east-1:597864876332:application-inference-profile/mxh86uu7v257"
+  news:          "arn:aws:bedrock:us-east-1:597864876332:application-inference-profile/mxh86uu7v257"
+  fundamentals:  "arn:aws:bedrock:us-east-1:597864876332:application-inference-profile/j0088oxmdngr"
+  geo:           "arn:aws:bedrock:us-east-1:597864876332:application-inference-profile/mxh86uu7v257"
+  ranking:       "arn:aws:bedrock:us-east-1:597864876332:application-inference-profile/j0088oxmdngr"
 
 schedule:
   run_at: "06:30"             # HH:MM — before US market open 09:30 ET
@@ -36,4 +36,4 @@ schedule:
   weekdays_only: true
 
 delivery:
-  method: email               # email | slack | terminal
+  method: terminal            # email | slack | terminal

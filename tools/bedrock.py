@@ -1,10 +1,10 @@
-"""AWS Bedrock LLM factory — returns cached BedrockChat instances per agent role."""
+"""AWS Bedrock LLM factory — returns cached CrewAI LLM instances per agent role."""
 
 import os
 from functools import lru_cache
 
 import yaml
-from langchain_aws import ChatBedrock
+from crewai import LLM
 
 
 def _load_config() -> dict:
@@ -14,10 +14,10 @@ def _load_config() -> dict:
 
 
 @lru_cache(maxsize=10)
-def get_llm(agent_name: str) -> ChatBedrock:
+def get_llm(agent_name: str) -> LLM:
     """
-    Returns the correct Bedrock LLM for each agent.
-    Haiku for fast/simple agents. Sonnet for complex reasoning.
+    Returns the correct Bedrock LLM for each agent via CrewAI's LLM class.
+    CrewAI uses LiteLLM under the hood — Bedrock models use the 'bedrock/' prefix.
 
     Usage:
         haiku  = get_llm("market")        → Claude Haiku
@@ -25,13 +25,19 @@ def get_llm(agent_name: str) -> ChatBedrock:
     """
     config = _load_config()
     model_id = config["models"][agent_name]
-    region = os.environ.get("AWS_REGION", config.get("aws_region", "us-east-1"))
+    region = os.environ.get("AWS_REGION", "us-east-1")
 
-    return ChatBedrock(
-        model_id=model_id,
-        region_name=region,
-        model_kwargs={
-            "temperature": 0.1,      # low temp for consistent, reproducible analysis
-            "max_tokens": 4096,
-        },
+    # ARNs must use the converse route; plain model IDs use the standard bedrock/ prefix
+    if model_id.startswith("arn:"):
+        model = f"bedrock/converse/{model_id}"
+    elif not model_id.startswith("bedrock/"):
+        model = f"bedrock/{model_id}"
+    else:
+        model = model_id
+
+    return LLM(
+        model=model,
+        temperature=0.1,
+        max_tokens=4096,
+        aws_region_name=region,
     )

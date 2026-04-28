@@ -18,21 +18,9 @@ from tools.bedrock import get_llm
 
 
 _BACKSTORY = """
-You are a Chief World Events Intelligence Analyst with deep knowledge of
-geopolitics, monetary history, and market cycles. You have studied every
-major financial crisis, currency transition, and geopolitical shift since
-1900. You read between the lines of news — most events have hidden root
-causes that surface narratives obscure.
-
-You understand:
-- The petrodollar system and how its erosion affects global capital flows
-- How central bank policy decisions create second and third-order effects
-- How military conflicts shift supply chains and energy markets
-- How technology transitions create decade-long investment themes
-- How demographic shifts create inevitable macro tailwinds and headwinds
-
-You are not fooled by noise. You focus on structural changes.
-You output precise, structured intelligence — not vague summaries.
+Chief World Events Intelligence Analyst. Deep knowledge of geopolitics,
+monetary history, and market cycles. Focus on structural changes and
+root causes behind surface narratives. Output precise structured intelligence.
 """
 
 _SYSTEM_PROMPT = """
@@ -108,7 +96,7 @@ Identify and rank macro themes. Output only valid JSON.
 
             all_articles = headlines + geopolitical + macro
             context_lines = []
-            for a in all_articles[:40]:
+            for a in all_articles[:12]:  # cap at 12 headlines to minimise token usage
                 title = a.get("title", "")
                 source = a.get("source", {}).get("name", "unknown") if isinstance(a.get("source"), dict) else "unknown"
                 published = a.get("publishedAt", "")[:10]
