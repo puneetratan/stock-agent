@@ -1,10 +1,24 @@
-"""AWS Bedrock LLM factory — returns cached CrewAI LLM instances per agent role."""
+"""LLM factory — returns cached CrewAI LLM instances per agent role.
+
+Currently configured for Anthropic API directly.
+To switch back to AWS Bedrock, swap the model strings to
+'bedrock/converse/<inference-profile-arn>' and remove ANTHROPIC_API_KEY.
+"""
 
 import os
 from functools import lru_cache
 
 import yaml
 from crewai import LLM
+
+# Anthropic API model IDs
+ANTHROPIC_MODELS = {
+    "sonnet": "anthropic/claude-sonnet-4-6",
+    "haiku":  "anthropic/claude-haiku-4-5-20251001",
+}
+
+# Which agents use sonnet vs haiku
+SONNET_AGENTS = {"orchestrator", "world", "causal", "fundamentals", "ranking"}
 
 
 def _load_config() -> dict:
@@ -16,28 +30,20 @@ def _load_config() -> dict:
 @lru_cache(maxsize=10)
 def get_llm(agent_name: str) -> LLM:
     """
-    Returns the correct Bedrock LLM for each agent via CrewAI's LLM class.
-    CrewAI uses LiteLLM under the hood — Bedrock models use the 'bedrock/' prefix.
-
-    Usage:
-        haiku  = get_llm("market")        → Claude Haiku
-        sonnet = get_llm("fundamentals")  → Claude Sonnet
+    Returns the correct LLM for each agent.
+    Sonnet for reasoning agents, Haiku for fast structured agents.
     """
-    config = _load_config()
-    model_id = config["models"][agent_name]
-    region = os.environ.get("AWS_REGION", "us-east-1")
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY not set in .env")
 
-    # ARNs must use the converse route; plain model IDs use the standard bedrock/ prefix
-    if model_id.startswith("arn:"):
-        model = f"bedrock/converse/{model_id}"
-    elif not model_id.startswith("bedrock/"):
-        model = f"bedrock/{model_id}"
-    else:
-        model = model_id
+    tier = "sonnet" if agent_name in SONNET_AGENTS else "haiku"
+    model = ANTHROPIC_MODELS[tier]
+    max_tokens = 8192 if agent_name == "ranking" else 4096
 
     return LLM(
         model=model,
+        api_key=api_key,
         temperature=0.1,
-        max_tokens=4096,
-        aws_region_name=region,
+        max_tokens=max_tokens,
     )

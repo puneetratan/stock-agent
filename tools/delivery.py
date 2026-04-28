@@ -103,6 +103,14 @@ def deliver_report(report: dict, method: str | None = None) -> None:
             cfg = yaml.safe_load(f)
         method = cfg.get("delivery", {}).get("method", "terminal")
 
+    # Always save a Substack HTML file alongside any delivery method
+    try:
+        from tools.substack import save_substack_post
+        path = save_substack_post(report, output_dir=".")
+        print(f"[delivery] Substack HTML saved → {path}")
+    except Exception as e:
+        print(f"[delivery] Substack HTML save failed: {e}")
+
     if method == "email":
         _deliver_email(report)
     elif method == "slack":

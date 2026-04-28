@@ -17,6 +17,34 @@ from models import FinalReport, HorizonPicks, Signal, SignalType, MarketRegime
 from tools.bedrock import get_llm
 
 
+def _repair_json(raw: str) -> dict:
+    """
+    Best-effort JSON repair for truncated or trailing-comma LLM output.
+    Tries progressively more aggressive fixes until one parses.
+    """
+    import re
+
+    attempts = [
+        raw,
+        # Remove trailing commas before ] or }
+        re.sub(r",\s*([}\]])", r"\1", raw),
+    ]
+
+    # Also try truncating at each closing brace from the end
+    for i in range(len(raw) - 1, max(len(raw) - 500, 0), -1):
+        if raw[i] == "}":
+            attempts.append(raw[: i + 1])
+
+    for attempt in attempts:
+        try:
+            return json.loads(attempt)
+        except json.JSONDecodeError:
+            continue
+
+    print("[RankingAgent] JSON repair failed — returning empty report")
+    return {}
+
+
 _BACKSTORY = """
 You are the Chief Investment Strategist. Every morning you review all intelligence
 gathered by a team of specialised analysts and synthesise it into clear, ranked
@@ -46,67 +74,36 @@ You always include one contrarian pick per horizon — the non-obvious play.
 """
 
 _RANKING_PROMPT = """
-You are the Chief Investment Strategist. Synthesise all analysis reports
-and produce the final ranked investment report.
+You are the Chief Investment Strategist. Synthesise all reports and produce
+a compact ranked investment report.
 
-CAUSAL THESES (root cause context):
+CAUSAL THESES:
 {causal_theses}
 
 ALL DEEP ANALYSIS REPORTS:
 {all_reports}
 
-For each stock in the reports, you have:
-- technical_signal, rsi, macd, volume_trend (from Market Agent)
-- sentiment_score, analyst_consensus (from News Agent)
-- revenue_growth_yoy, gross_margin, business_quality, valuation (from Fundamentals Agent)
-- macro_tailwinds, geopolitical_risks, risk_level, theme_exposure (from Geo Agent)
-
 RANKING FORMULA:
 conviction = (fundamental_score × 0.35) + (technical_score × 0.25) +
              (sentiment_score × 0.20) + (geo_score × 0.20)
 
-Map agent outputs to 0-100 scores:
-- fundamental: exceptional=90, high=75, average=50, poor=25
-- technical: bullish=80, neutral=50, bearish=20
-- sentiment: use sentiment_score × 10
-- geo: low_risk=80, medium_risk=60, high_risk=30, critical_risk=10
+Scores: fundamental: exceptional=90, high=75, average=50, poor=25
+        technical: bullish=80, neutral=50, bearish=20
+        sentiment: sentiment_score × 10
+        geo: low_risk=80, medium_risk=60, high_risk=30, critical=10
 
-Output STRICTLY as JSON — no other text:
+Output STRICTLY as JSON — no other text. Keep thesis fields to 1 sentence max:
 {{
-  "market_regime": {{
-    "label": "string",
-    "description": "string",
-    "recommended_posture": "string"
-  }},
-  "causal_summary": "2-3 paragraph synthesis of all root causes and what they mean for markets",
+  "market_regime": {{"label": "string", "description": "1 sentence", "recommended_posture": "1 sentence"}},
+  "causal_summary": "2-3 sentences max",
+  "analyst_note": "2-3 sentences max",
   "horizons": {{
-    "quarter": {{
-      "picks": [
-        {{
-          "ticker": "NVDA",
-          "signal": "BUY",
-          "confidence": 82,
-          "thesis": "one paragraph",
-          "risks": ["risk1"],
-          "theme_ids": ["THEME_ID"],
-          "is_contrarian": false,
-          "technical_score": 80,
-          "sentiment_score": 8.5,
-          "fundamental_score": 85,
-          "geo_score": 70
-        }}
-      ],
-      "avoid": [{{"ticker": "XYZ", "signal": "AVOID", "confidence": 75, "thesis": "why", "risks": []}}],
-      "contrarian_picks": [{{"ticker": "ABC", "signal": "BUY", "confidence": 60, "thesis": "non-obvious thesis", "risks": [], "is_contrarian": true}}]
-    }},
-    "one_year": {{}},
-    "two_year": {{}},
-    "five_year": {{}},
-    "ten_year": {{}}
-  }},
-  "analyst_note": "free-form strategic commentary",
-  "stocks_screened": <number>,
-  "stocks_deep_analysed": <number>
+    "quarter":   {{"picks": [{{"ticker": "X", "confidence": 80, "thesis": "1 sentence", "risks": ["r1"], "theme_ids": [], "is_contrarian": false, "technical_score": 80, "sentiment_score": 8.0, "fundamental_score": 85, "geo_score": 70}}], "avoid": [{{"ticker": "Y", "confidence": 70, "thesis": "1 sentence", "risks": []}}], "contrarian_picks": [{{"ticker": "Z", "confidence": 60, "thesis": "1 sentence", "risks": [], "is_contrarian": true}}]}},
+    "one_year":  {{"picks": [], "avoid": [], "contrarian_picks": []}},
+    "two_year":  {{"picks": [], "avoid": [], "contrarian_picks": []}},
+    "five_year": {{"picks": [], "avoid": [], "contrarian_picks": []}},
+    "ten_year":  {{"picks": [], "avoid": [], "contrarian_picks": []}}
+  }}
 }}
 """
 
@@ -191,6 +188,12 @@ class RankingAgent:
         result = crew.kickoff()
 
         raw_text = str(result)
+
+        # Save raw output for debugging
+        with open("/tmp/ranking_raw_output.txt", "w") as f:
+            f.write(raw_text)
+        print(f"[RankingAgent] Raw output saved to /tmp/ranking_raw_output.txt ({len(raw_text)} chars)")
+
         if "```json" in raw_text:
             raw_text = raw_text.split("```json")[1].split("```")[0].strip()
         elif "```" in raw_text:
@@ -201,8 +204,8 @@ class RankingAgent:
         try:
             data = json.loads(raw_text[start:end])
         except json.JSONDecodeError as e:
-            print(f"[RankingAgent] JSON parse error: {e}")
-            data = {}
+            print(f"[RankingAgent] JSON parse error: {e} — attempting repair")
+            data = _repair_json(raw_text[start:end])
 
         now = datetime.now(timezone.utc).isoformat()
         horizons = []
