@@ -1,0 +1,39 @@
+intelligence:
+  scan_world_events: true
+  second_order_analysis: true
+  auto_detect_themes: true
+  causal_depth: 4             # how many layers deep to trace causes
+
+screening:
+  universe: "SP500"           # SP500, NASDAQ100, or ALL
+  max_candidates: 60          # stocks passing Stage 1 screener
+  max_deep_analyse: 20        # stocks getting full 4-agent treatment
+  min_market_cap_m: 500       # minimum market cap in millions
+  min_avg_volume: 500000      # minimum average daily volume
+
+horizons:
+  quarter:   5                # top N picks per horizon
+  one_year:  5
+  two_year:  5
+  five_year: 5
+  ten_year:  5
+
+models:
+  # Haiku for fast/simple agents, Sonnet for reasoning agents
+  orchestrator:  "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  world:         "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  causal:        "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  screener:      "anthropic.claude-3-haiku-20240307-v1:0"
+  market:        "anthropic.claude-3-haiku-20240307-v1:0"
+  news:          "anthropic.claude-3-haiku-20240307-v1:0"
+  fundamentals:  "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  geo:           "anthropic.claude-3-haiku-20240307-v1:0"
+  ranking:       "anthropic.claude-3-5-sonnet-20241022-v2:0"
+
+schedule:
+  run_at: "06:30"             # HH:MM — before US market open 09:30 ET
+  timezone: "US/Eastern"
+  weekdays_only: true
+
+delivery:
+  method: email               # email | slack | terminal
