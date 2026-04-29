@@ -20,6 +20,7 @@ class Collections:
     SENTIMENT_HISTORY = "sentiment_history"
     NARRATIVE_CYCLES = "narrative_cycles"
     GOOGLE_TRENDS = "google_trends_history"
+    RUN_METADATA  = "run_metadata"
 
 
 # Every document written by agents carries these top-level fields.
@@ -76,4 +77,8 @@ def ensure_indexes() -> None:
     ])
     db[Collections.GOOGLE_TRENDS].create_indexes([
         IndexModel([("keyword", ASCENDING), ("captured_at", DESCENDING)]),
+    ])
+    db[Collections.RUN_METADATA].create_indexes([
+        IndexModel([("run_id", ASCENDING), ("status", ASCENDING)]),
+        IndexModel([("started_at", DESCENDING)]),
     ])

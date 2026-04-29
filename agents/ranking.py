@@ -6,6 +6,7 @@ The most important agent — its output is what the user reads every morning.
 """
 
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -220,7 +221,19 @@ class RankingAgent:
             print(f"[RankingAgent] Could not load narrative phases: {e}")
 
         crew = self._build_crew(causal_theses, all_reports_dict, sentiment_report, narrative_phases)
-        result = crew.kickoff()
+
+        # Retry up to 2 times on failure
+        last_exc = None
+        for attempt in range(1, 3):
+            try:
+                result = crew.kickoff()
+                break
+            except Exception as e:
+                last_exc = e
+                print(f"[RankingAgent] Attempt {attempt} failed: {e} — retrying...")
+                time.sleep(10)
+        else:
+            raise RuntimeError(f"Ranking crew failed after 2 attempts: {last_exc}")
 
         raw_text = str(result)
 

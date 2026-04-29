@@ -221,7 +221,7 @@ Determine current hype cycle phase. Output only valid JSON.
                 {"$replaceRoot": {"newRoot": "$latest"}},
             ]
             phases = list(col.aggregate(pipeline))
-            return {p.get("theme", "UNKNOWN"): p for p in phases}
+            return {p.get("theme", "UNKNOWN"): {k: v for k, v in p.items() if k != "_id"} for p in phases}
         except Exception as e:
             log.warning(f"[NarrativeCycleAgent] get_phase_context failed: {e}")
             return {}

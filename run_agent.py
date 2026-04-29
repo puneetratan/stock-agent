@@ -39,19 +39,33 @@ def ensure_indexes():
         print(f"[run_agent] Warning: could not ensure MongoDB indexes: {e}")
 
 
+TICKER_TIMEOUT_SECONDS = 1200  # 20 min per ticker before giving up
+
+
 def run_analysis_crew_for_ticker(ticker: str, theses: list[dict], run_id: str) -> dict:
-    """Run the 4-agent deep analysis crew for a single ticker."""
+    """Run the 4-agent deep analysis crew for a single ticker with a hard timeout."""
+    import concurrent.futures
     from agents.crew import build_analysis_crew, parse_crew_outputs
     from db import get_collection
     from db.collections import Collections
 
     print(f"[run_agent] Deep analysis: {ticker}")
-    try:
+
+    def _kickoff():
         crew = build_analysis_crew(ticker=ticker, theses=theses, run_id=run_id)
-        result = crew.kickoff()
+        return crew.kickoff()
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(_kickoff)
+            try:
+                result = future.result(timeout=TICKER_TIMEOUT_SECONDS)
+            except concurrent.futures.TimeoutError:
+                print(f"[run_agent] TIMEOUT after {TICKER_TIMEOUT_SECONDS//60} min — skipping {ticker}")
+                return {"error": f"timeout after {TICKER_TIMEOUT_SECONDS}s"}
+
         reports = parse_crew_outputs(result, ticker, run_id)
 
-        # Persist each sub-report to the appropriate collection
         col_map = {
             "market":       Collections.MARKET_DATA,
             "news":         Collections.NEWS_SENTIMENT,
@@ -71,9 +85,33 @@ def run_analysis_crew_for_ticker(ticker: str, theses: list[dict], run_id: str) -
         return {"error": str(e)}
 
 
+STATE_FILE = os.path.join(os.path.dirname(__file__), "current_run.json")
+
+
+def _write_state(run_id: str, pid: int, log_file: str) -> None:
+    import json
+    with open(STATE_FILE, "w") as f:
+        json.dump({"run_id": run_id, "pid": pid, "log_file": log_file,
+                   "started_at": datetime.now(timezone.utc).isoformat()}, f)
+
+
+def _clear_state() -> None:
+    try:
+        os.remove(STATE_FILE)
+    except FileNotFoundError:
+        pass
+
+
 def main():
     run_id = str(uuid.uuid4())
     start_time = datetime.now(timezone.utc)
+
+    log_file = os.path.join(
+        os.path.dirname(__file__),
+        f"run_{start_time.strftime('%Y%m%d_%H%M%S')}.log",
+    )
+    _write_state(run_id, os.getpid(), log_file)
+
     print(f"\n{'='*60}")
     print(f"Stock Intelligence Agent — Run {run_id[:8]}")
     print(f"Started: {start_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
@@ -141,6 +179,12 @@ def main():
     # -----------------------------------------------------------------------
     # Step 4: Screener — filter stock universe
     # -----------------------------------------------------------------------
+    import yaml
+    cfg_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    with open(cfg_path) as f:
+        cfg = yaml.safe_load(f)
+    max_deep = cfg["screening"]["max_deep_analyse"]
+
     print("\n[STEP 4] Stock Screener")
     from agents.screener import ScreenerAgent
     screener = ScreenerAgent()
@@ -150,20 +194,42 @@ def main():
         top_tickers = [c["ticker"] for c in candidates[:5]]
         print(f"     Top 5: {', '.join(top_tickers)}")
 
+    # Persist run metadata + ordered candidate list so watchdog/resume can use it
+    from db import get_collection
+    from db.collections import Collections
+    get_collection(Collections.RUN_METADATA).update_one(
+        {"run_id": run_id},
+        {"$set": {
+            "run_id": run_id,
+            "started_at": start_time.isoformat(),
+            "pid": os.getpid(),
+            "ordered_tickers": [c["ticker"] for c in candidates[:max_deep]],
+            "total_candidates": len(candidates),
+            "status": "running",
+        }},
+        upsert=True,
+    )
+
     # -----------------------------------------------------------------------
     # Step 5: Deep analysis — 4 agents per stock
     # -----------------------------------------------------------------------
-    import yaml
-    cfg_path = os.path.join(os.path.dirname(__file__), "config.yaml")
-    with open(cfg_path) as f:
-        cfg = yaml.safe_load(f)
-    max_deep = cfg["screening"]["max_deep_analyse"]
-
     analyse_list = candidates[:max_deep]
     print(f"\n[STEP 5] Deep Analysis ({len(analyse_list)} stocks)")
 
+    start_from = None
+    for arg in sys.argv[1:]:
+        if arg.startswith("--start-from="):
+            start_from = arg.split("=", 1)[1].upper()
+    skipping = start_from is not None
+
     for i, candidate in enumerate(analyse_list, 1):
         ticker = candidate["ticker"]
+        if skipping:
+            if ticker.upper() == start_from:
+                skipping = False
+            else:
+                print(f"\n  [{i}/{len(analyse_list)}] Skipping {ticker} (already done)")
+                continue
         print(f"\n  [{i}/{len(analyse_list)}] Analysing {ticker}...")
         run_analysis_crew_for_ticker(ticker, theses, run_id)
 
@@ -192,6 +258,14 @@ def main():
     print(f"Run ID: {run_id}")
     print(f"{'='*60}\n")
 
+    _clear_state()
+    from db import get_collection
+    from db.collections import Collections
+    get_collection(Collections.RUN_METADATA).update_one(
+        {"run_id": run_id},
+        {"$set": {"status": "complete", "finished_at": datetime.now(timezone.utc).isoformat(),
+                  "total_signals": report.total_signals}},
+    )
     return report
 
 

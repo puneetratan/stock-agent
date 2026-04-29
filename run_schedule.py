@@ -40,6 +40,21 @@ def _is_weekday() -> bool:
     return now_et.weekday() < 5   # 0=Monday … 4=Friday
 
 
+def _start_watchdog() -> None:
+    """Start the watchdog as a background subprocess."""
+    import subprocess
+    script = os.path.join(os.path.dirname(__file__), "watchdog.py")
+    venv_python = os.path.join(os.path.dirname(__file__), ".venv", "bin", "python")
+    watchdog_log = os.path.join(os.path.dirname(__file__), "watchdog.log")
+    with open(watchdog_log, "a") as out:
+        proc = subprocess.Popen(
+            [venv_python, script],
+            stdout=out, stderr=out,
+            start_new_session=True,
+        )
+    log.info(f"Watchdog started — PID {proc.pid}")
+
+
 def run_job():
     """Called by the scheduler at the configured time."""
     cfg = _load_config()
@@ -47,6 +62,7 @@ def run_job():
         log.info("Skipping — today is a weekend")
         return
 
+    _start_watchdog()
     log.info("Starting scheduled intelligence run")
     try:
         from run_agent import main
@@ -112,7 +128,7 @@ def run_monthly_crossover():
 
 def _local_to_utc(run_at: str, tz_name: str) -> str:
     tz = pytz.timezone(tz_name)
-    now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
+    now_utc = datetime.now(pytz.utc)
     now_local = now_utc.astimezone(tz)
     hour, minute = map(int, run_at.split(":"))
     target_local = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
