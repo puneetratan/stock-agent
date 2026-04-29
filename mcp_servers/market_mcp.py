@@ -279,5 +279,88 @@ def screen_stocks(criteria: dict) -> list[dict]:
         return []
 
 
+@mcp.tool()
+def get_vix() -> dict:
+    """
+    Current VIX level from yfinance (^VIX).
+    Interpretation: below 15 = complacent, 15-25 = normal,
+    above 30 = fear, above 40 = panic.
+    """
+    try:
+        import yfinance as yf
+        t = yf.Ticker("^VIX")
+        hist = t.history(period="5d")
+        if hist.empty:
+            return {"vix": None, "error": "no data"}
+        latest = float(hist["Close"].iloc[-1])
+        prev   = float(hist["Close"].iloc[-2]) if len(hist) > 1 else latest
+
+        if latest < 15:
+            label = "complacent"
+        elif latest < 25:
+            label = "normal"
+        elif latest < 30:
+            label = "elevated"
+        elif latest < 40:
+            label = "fear"
+        else:
+            label = "panic"
+
+        return {
+            "vix": round(latest, 2),
+            "prev_close": round(prev, 2),
+            "change": round(latest - prev, 2),
+            "label": label,
+            "source": "yfinance",
+        }
+    except Exception as e:
+        return {"vix": None, "error": str(e)}
+
+
+@mcp.tool()
+def get_put_call_ratio(ticker: str = "SPY") -> dict:
+    """
+    Compute put/call ratio from live options chain via yfinance.
+    Uses SPY as market proxy by default.
+    Above 1.2 = fear, below 0.7 = greed.
+    """
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        expiries = t.options
+        if not expiries:
+            return {"put_call_ratio": None, "error": "no options data"}
+
+        # Use nearest expiry for most current sentiment
+        chain = t.option_chain(expiries[0])
+
+        call_vol = chain.calls["volume"].fillna(0).sum()
+        put_vol  = chain.puts["volume"].fillna(0).sum()
+
+        if call_vol == 0:
+            return {"put_call_ratio": None, "error": "zero call volume"}
+
+        ratio = round(float(put_vol) / float(call_vol), 3)
+
+        if ratio > 1.2:
+            label = "fear"
+        elif ratio < 0.7:
+            label = "greed"
+        else:
+            label = "neutral"
+
+        return {
+            "ticker": ticker,
+            "put_call_ratio": ratio,
+            "call_volume": int(call_vol),
+            "put_volume": int(put_vol),
+            "label": label,
+            "expiry_used": expiries[0],
+            "source": "yfinance",
+        }
+    except Exception as e:
+        return {"put_call_ratio": None, "error": str(e)}
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
