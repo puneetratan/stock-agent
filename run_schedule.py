@@ -49,12 +49,74 @@ def run_job():
 
     log.info("Starting scheduled intelligence run")
     try:
-        # Import here so module-level errors don't crash the scheduler
         from run_agent import main
         report = main()
         log.info(f"Run complete — {report.total_signals} signals, run_id={report.run_id}")
     except Exception as e:
         log.error(f"Run failed: {e}", exc_info=True)
+
+
+def run_verification_job():
+    """Nightly signal verification — runs at 23:00."""
+    log.info("Starting nightly signal verification")
+    try:
+        from signal_verification_job import verify_signals
+        scorecard = verify_signals()
+        log.info(f"Verification complete — {scorecard.get('total_verified_this_run', 0)} signals verified")
+    except Exception as e:
+        log.error(f"Signal verification failed: {e}", exc_info=True)
+
+
+def run_weekly_sentiment():
+    """Weekly sentiment snapshot — runs every Sunday at 08:00."""
+    log.info("Starting weekly sentiment snapshot")
+    try:
+        from agents.sentiment import SentimentAgent
+        report = SentimentAgent().analyse(save=True)
+        log.info(f"Sentiment snapshot saved — emotion={report.get('market_emotion')}, score={report.get('fear_greed_score')}")
+    except Exception as e:
+        log.error(f"Weekly sentiment failed: {e}", exc_info=True)
+
+
+def run_monthly_crossover():
+    """Monthly crossover tracking — first of each month at 09:00."""
+    log.info("Monthly crossover check starting")
+    try:
+        from tools.crossover_tracker import get_crossover_status
+        status = get_crossover_status()
+        log.info(f"Crossover status: {status}")
+
+        print("\n" + "=" * 50)
+        print("💰 MONTHLY CROSSOVER CHECK")
+        print("=" * 50)
+        if status.get("crossover_confirmed"):
+            print("🎉 CROSSOVER CONFIRMED — 3+ consecutive months!")
+        else:
+            gap = status.get("gap_to_crossover", "unknown")
+            proj = status.get("projected_crossover", "unknown")
+            print(f"Gap remaining:    {gap}")
+            print(f"Projected date:   {proj}")
+        print("=" * 50 + "\n")
+        print("Enter job income for this month (or press Enter to skip):")
+        try:
+            job_income = input("> ").strip()
+            if job_income:
+                from tools.crossover_tracker import record_monthly
+                result = record_monthly(job_income=float(job_income), product_revenue=0.0)
+                log.info(f"Monthly crossover recorded: {result}")
+        except (EOFError, ValueError):
+            log.info("Skipping monthly income input (non-interactive mode)")
+    except Exception as e:
+        log.error(f"Monthly crossover failed: {e}", exc_info=True)
+
+
+def _local_to_utc(run_at: str, tz_name: str) -> str:
+    tz = pytz.timezone(tz_name)
+    now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
+    now_local = now_utc.astimezone(tz)
+    hour, minute = map(int, run_at.split(":"))
+    target_local = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return target_local.astimezone(pytz.utc).strftime("%H:%M")
 
 
 def main():
@@ -65,24 +127,34 @@ def main():
     log.info(f"Scheduler starting — will run daily at {run_at} {tz_name}")
     log.info("Keep this process alive (tmux / screen / systemd)")
 
-    # schedule library uses local time; we convert run_at to UTC
-    tz = pytz.timezone(tz_name)
-    now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
-    now_local = now_utc.astimezone(tz)
+    # Morning agent run (weekdays at 06:30 ET)
+    utc_morning = _local_to_utc(run_at, tz_name)
+    log.info(f"Morning run scheduled at UTC {utc_morning} (= {run_at} {tz_name})")
+    schedule.every().day.at(utc_morning).do(run_job)
 
-    hour, minute = map(int, run_at.split(":"))
-    # Calculate UTC equivalent of the local run time
-    target_local = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    target_utc = target_local.astimezone(pytz.utc)
-    utc_time_str = target_utc.strftime("%H:%M")
+    # Nightly verification at 23:00 UTC every day
+    schedule.every().day.at("23:00").do(run_verification_job)
+    log.info("Nightly verification scheduled at 23:00 UTC")
 
-    log.info(f"Scheduling at UTC {utc_time_str} (= {run_at} {tz_name})")
-    schedule.every().day.at(utc_time_str).do(run_job)
+    # Weekly sentiment snapshot — Sunday 08:00 UTC
+    schedule.every().sunday.at("08:00").do(run_weekly_sentiment)
+    log.info("Weekly sentiment snapshot scheduled every Sunday 08:00 UTC")
 
-    # Optionally run immediately on start (useful for testing)
+    # Monthly crossover — first of each month at 09:00 UTC
+    # schedule library doesn't support "first of month" natively,
+    # so we run daily at 09:00 and guard with a day-of-month check.
+    schedule.every().day.at("09:00").do(
+        lambda: run_monthly_crossover() if datetime.now().day == 1 else None
+    )
+    log.info("Monthly crossover check scheduled for 1st of each month at 09:00 UTC")
+
     if "--now" in sys.argv:
         log.info("--now flag detected — running immediately")
         run_job()
+
+    if "--verify-now" in sys.argv:
+        log.info("--verify-now flag detected — running verification immediately")
+        run_verification_job()
 
     while True:
         schedule.run_pending()

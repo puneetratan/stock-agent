@@ -80,8 +80,20 @@ a compact ranked investment report.
 CAUSAL THESES:
 {causal_theses}
 
+SENTIMENT REPORT:
+{sentiment_report}
+
+NARRATIVE CYCLE PHASES:
+{narrative_phases}
+
 ALL DEEP ANALYSIS REPORTS:
 {all_reports}
+
+NARRATIVE CYCLE RULES — apply these adjustments before scoring:
+  - phase_1_emerging themes: BOOST conviction for stocks in that theme (+5 pts)
+  - phase_2_hype themes: FLAG as late-cycle risk, add to risks list
+  - phase_3_disillusion themes: LOWER conviction, flag short opportunity
+  - phase_4_dead_or_rebirth themes: contrarian flag only, long-horizon only
 
 RANKING FORMULA:
 conviction = (fundamental_score × 0.35) + (technical_score × 0.25) +
@@ -115,7 +127,7 @@ class RankingAgent:
     def __init__(self):
         self._llm = get_llm("ranking")
 
-    def _build_crew(self, causal_theses: list[dict], all_reports: dict) -> Crew:
+    def _build_crew(self, causal_theses: list[dict], all_reports: dict, sentiment_report: dict | None = None, narrative_phases: dict | None = None) -> Crew:
         agent = Agent(
             role="Chief Investment Strategist",
             goal=(
@@ -157,9 +169,14 @@ class RankingAgent:
             }
             reports_json = json.dumps(slim, indent=2)
 
+        sentiment_json = json.dumps(sentiment_report or {}, indent=2)[:1500]
+        narrative_json = json.dumps(narrative_phases or {}, indent=2)[:1500]
+
         task = Task(
             description=_RANKING_PROMPT.format(
                 causal_theses=json.dumps(causal_theses, indent=2)[:8000],
+                sentiment_report=sentiment_json,
+                narrative_phases=narrative_json,
                 all_reports=reports_json[:40000],
             ),
             agent=agent,
@@ -185,7 +202,24 @@ class RankingAgent:
         causal_theses = list(get_collection(Collections.CAUSAL_THESES).find({"run_id": run_id}, {"_id": 0}))
         screener_results = list(get_collection(Collections.SCREENER_RESULTS).find({"run_id": run_id}, {"_id": 0}))
 
-        crew = self._build_crew(causal_theses, all_reports_dict)
+        # Load latest sentiment and narrative cycle data for context
+        sentiment_report = None
+        narrative_phases = None
+        try:
+            sent_col = get_collection(Collections.SENTIMENT_HISTORY)
+            latest_sentiment = sent_col.find_one({}, {"_id": 0}, sort=[("captured_at", -1)])
+            if latest_sentiment:
+                sentiment_report = {k: v for k, v in latest_sentiment.items() if k not in ("raw_data", "_id")}
+        except Exception as e:
+            print(f"[RankingAgent] Could not load sentiment: {e}")
+
+        try:
+            from agents.narrative_cycle import NarrativeCycleAgent
+            narrative_phases = NarrativeCycleAgent().get_phase_context()
+        except Exception as e:
+            print(f"[RankingAgent] Could not load narrative phases: {e}")
+
+        crew = self._build_crew(causal_theses, all_reports_dict, sentiment_report, narrative_phases)
         result = crew.kickoff()
 
         raw_text = str(result)
@@ -212,6 +246,22 @@ class RankingAgent:
         horizons = []
         signals_col = get_collection(Collections.SIGNALS)
 
+        # Cache current prices to avoid multiple API calls per ticker
+        _price_cache: dict[str, float | None] = {}
+
+        def _get_price(ticker: str) -> float | None:
+            if ticker in _price_cache:
+                return _price_cache[ticker]
+            try:
+                import tools.yfinance_client as yfc
+                snap = yfc.get_snapshot(ticker)
+                day = snap.get("ticker", {}).get("day", {})
+                price = day.get("c") or snap.get("ticker", {}).get("prevDay", {}).get("c")
+                _price_cache[ticker] = float(price) if price else None
+            except Exception:
+                _price_cache[ticker] = None
+            return _price_cache[ticker]
+
         for horizon_name, horizon_data in data.get("horizons", {}).items():
             if not isinstance(horizon_data, dict):
                 continue
@@ -220,9 +270,11 @@ class RankingAgent:
                 signals = []
                 for item in (raw_list or []):
                     try:
+                        ticker = item.get("ticker", "")
+                        price_at_signal = _get_price(ticker) if ticker else None
                         s = Signal(
                             run_id=run_id,
-                            ticker=item.get("ticker", ""),
+                            ticker=ticker,
                             signal=signal_type,
                             horizon=horizon_name,
                             confidence=int(item.get("confidence", 50)),
@@ -235,6 +287,7 @@ class RankingAgent:
                             theme_ids=item.get("theme_ids", []),
                             is_contrarian=item.get("is_contrarian", False),
                             created_at=now,
+                            price_at_signal=price_at_signal,
                         )
                         signals_col.update_one(
                             {"ticker": s.ticker, "run_id": run_id, "horizon": horizon_name},

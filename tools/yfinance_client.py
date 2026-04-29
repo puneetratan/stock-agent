@@ -74,3 +74,47 @@ def get_aggregates(ticker: str, days: int = 90) -> dict:
         })
 
     return {"results": results}
+
+
+def get_options_contracts(ticker: str) -> dict:
+    """Options chain summary — matches Polygon's options shape."""
+    try:
+        t = yf.Ticker(ticker)
+        expiries = t.options
+        if not expiries:
+            return {"results": []}
+        # Use nearest expiry
+        chain = t.option_chain(expiries[0])
+        calls = [{"contract_type": "call", "strike": row["strike"], "volume": row.get("volume", 0)}
+                 for _, row in chain.calls.iterrows()]
+        puts = [{"contract_type": "put", "strike": row["strike"], "volume": row.get("volume", 0)}
+                for _, row in chain.puts.iterrows()]
+        return {"results": calls + puts}
+    except Exception:
+        return {"results": []}
+
+
+def get_close_on_date(ticker: str, target_date: str) -> float | None:
+    """
+    Returns closing price on or near target_date (YYYY-MM-DD).
+    Looks back up to 5 days for weekends/holidays.
+    Used by signal_verification_job.
+    """
+    from datetime import datetime, timedelta
+    try:
+        t = yf.Ticker(ticker)
+        dt = datetime.strptime(target_date, "%Y-%m-%d")
+        # Fetch a window around the target date
+        start = (dt - timedelta(days=7)).strftime("%Y-%m-%d")
+        end = (dt + timedelta(days=1)).strftime("%Y-%m-%d")
+        hist = t.history(start=start, end=end)
+        if hist.empty:
+            return None
+        # Return the closest date at or before target
+        hist.index = hist.index.tz_localize(None) if hist.index.tzinfo else hist.index
+        hist = hist[hist.index <= dt]
+        if hist.empty:
+            return None
+        return float(hist.iloc[-1]["Close"])
+    except Exception:
+        return None

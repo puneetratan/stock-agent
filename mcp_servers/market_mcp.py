@@ -13,7 +13,7 @@ from mcp.server.fastmcp import FastMCP
 
 from db import get_collection
 from db.collections import Collections
-from tools import polygon
+import tools.yfinance_client as yfc
 
 mcp = FastMCP("market_mcp")
 
@@ -102,14 +102,14 @@ def _compute_macd(closes: list[float]) -> dict:
 def get_price_history(ticker: str, days: int = 90) -> dict:
     """Fetch daily OHLCV history for `ticker` over last `days` calendar days."""
     try:
-        raw = polygon.get_aggregates(ticker, days)
+        raw = yfc.get_aggregates(ticker, days)
         _save_raw(Collections.MARKET_DATA, ticker, "aggregates", raw)
         bars = raw.get("results", [])
         return {
             "ticker": ticker,
             "bars": bars,
             "count": len(bars),
-            "source": "polygon",
+            "source": "yfinance",
         }
     except Exception as e:
         return {"ticker": ticker, "error": str(e), "bars": []}
@@ -119,7 +119,7 @@ def get_price_history(ticker: str, days: int = 90) -> dict:
 def get_rsi(ticker: str) -> dict:
     """Compute 14-period RSI from last 90 days of price data."""
     try:
-        raw = polygon.get_aggregates(ticker, 90)
+        raw = yfc.get_aggregates(ticker, 90)
         bars = raw.get("results", [])
         closes = [b["c"] for b in bars]
         rsi = _compute_rsi(closes)
@@ -132,7 +132,7 @@ def get_rsi(ticker: str) -> dict:
 def get_macd(ticker: str) -> dict:
     """Compute MACD (12/26/9) from last 90 days of price data."""
     try:
-        raw = polygon.get_aggregates(ticker, 120)
+        raw = yfc.get_aggregates(ticker, 120)
         bars = raw.get("results", [])
         closes = [b["c"] for b in bars]
         result = _compute_macd(closes)
@@ -146,7 +146,7 @@ def get_macd(ticker: str) -> dict:
 def get_volume_profile(ticker: str) -> dict:
     """Average volume vs recent volume — detects unusual activity."""
     try:
-        raw = polygon.get_aggregates(ticker, 60)
+        raw = yfc.get_aggregates(ticker, 60)
         bars = raw.get("results", [])
         if not bars:
             return {"ticker": ticker, "error": "no data"}
@@ -170,7 +170,7 @@ def get_volume_profile(ticker: str) -> dict:
 def get_options_flow(ticker: str) -> dict:
     """Summarise options chain to derive call/put sentiment."""
     try:
-        raw = polygon.get_options_contracts(ticker)
+        raw = yfc.get_options_contracts(ticker)
         _save_raw(Collections.MARKET_DATA, ticker, "options", raw)
         contracts = raw.get("results", [])
         calls = [c for c in contracts if c.get("contract_type") == "call"]
@@ -192,7 +192,7 @@ def get_options_flow(ticker: str) -> dict:
 def get_52w_range(ticker: str) -> dict:
     """52-week high/low and current price position within that range."""
     try:
-        raw = polygon.get_aggregates(ticker, 365)
+        raw = yfc.get_aggregates(ticker, 365)
         bars = raw.get("results", [])
         if not bars:
             return {"ticker": ticker, "error": "no data"}
@@ -218,13 +218,9 @@ def get_52w_range(ticker: str) -> dict:
 def get_sector_stocks(sector: str) -> list[str]:
     """Return a list of tickers for a given sector from Polygon reference data."""
     try:
-        results = polygon.screen_tickers(
-            {"market": "stocks", "type": "CS", "active": "true", "limit": 250}
-        )
-        # Polygon sector field varies; filter by SIC description when available
-        tickers = [r["ticker"] for r in results if r.get("sic_description", "").lower().startswith(sector.lower())]
-        return tickers[:100]
-    except Exception as e:
+        from agents.screener import GLOBAL_UNIVERSE
+        return [t for t, _, _ in GLOBAL_UNIVERSE][:100]
+    except Exception:
         return []
 
 
@@ -232,8 +228,8 @@ def get_sector_stocks(sector: str) -> list[str]:
 def get_stock_metrics(ticker: str) -> dict:
     """Price + market cap + basic metadata for a single ticker."""
     try:
-        snap = polygon.get_snapshot(ticker)
-        detail = polygon.get_ticker_details(ticker)
+        snap = yfc.get_snapshot(ticker)
+        detail = yfc.get_ticker_details(ticker)
         _save_raw(Collections.MARKET_DATA, ticker, "snapshot", snap)
         day = snap.get("ticker", {}).get("day", {})
         results = detail.get("results", {})
@@ -256,9 +252,8 @@ def screen_stocks(criteria: dict) -> list[dict]:
     criteria keys: min_market_cap (int), min_volume (int), max_results (int)
     """
     try:
-        raw_tickers = polygon.screen_tickers(
-            {"market": "stocks", "type": "CS", "active": "true", "limit": 250}
-        )
+        from agents.screener import GLOBAL_UNIVERSE
+        raw_tickers = [{"ticker": t} for t, _, _ in GLOBAL_UNIVERSE]
         min_cap = criteria.get("min_market_cap", 500_000_000)
         min_vol = criteria.get("min_volume", 500_000)
         max_res = criteria.get("max_results", 60)

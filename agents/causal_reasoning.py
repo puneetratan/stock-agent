@@ -62,6 +62,7 @@ OUTPUT STRICTLY as JSON — no other text:
     "ten_year": {"sectors": ["sector1"], "tickers_to_watch": ["A", "B"], "avoid_sectors": ["x"], "reason": "..."}
   },
   "risk_flags": ["condition that would invalidate thesis"],
+  "sentiment_alignment": "bullish sentiment CONFIRMS causal thesis OR WARNING — sentiment CONTRADICTS causal thesis (contrarian signal)",
   "confidence": 75
 }
 """
@@ -132,7 +133,7 @@ Perform 4-level causal analysis. Output only valid JSON.
             lines.append(f"FRED data unavailable: {e}")
         return "\n".join(lines) if lines else "Macro data unavailable."
 
-    def analyse(self, themes: list[Theme], run_id: str | None = None) -> list[dict]:
+    def analyse(self, themes: list[Theme], run_id: str | None = None, sentiment_report: dict | None = None) -> list[dict]:
         """
         Run causal analysis for each theme.
         Returns list of thesis dicts and persists to MongoDB.
@@ -142,10 +143,22 @@ Perform 4-level causal analysis. Output only valid JSON.
         col = get_collection(Collections.CAUSAL_THESES)
         results = []
 
+        sentiment_context = ""
+        if sentiment_report:
+            emotion = sentiment_report.get("market_emotion", "unknown")
+            score = sentiment_report.get("fear_greed_score", 50)
+            contrarian = sentiment_report.get("contrarian_signal", "")
+            sentiment_context = (
+                f"\nSENTIMENT CONTEXT:\n"
+                f"  Market emotion: {emotion} (fear/greed score: {score}/100)\n"
+                f"  Contrarian signal: {contrarian}\n"
+                f"  Summary: {sentiment_report.get('summary', '')}\n"
+            )
+
         for theme in themes:
             print(f"[CausalReasoningAgent] Analysing theme: {theme.id}")
             try:
-                crew = self._build_crew(theme, macro_context)
+                crew = self._build_crew(theme, macro_context + sentiment_context)
                 result = crew.kickoff()
 
                 raw_text = str(result)

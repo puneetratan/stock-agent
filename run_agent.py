@@ -97,21 +97,51 @@ def main():
         sys.exit(1)
 
     # -----------------------------------------------------------------------
-    # Step 2: Causal Reasoning — root cause 3-4 levels deep
+    # Step 2: Sentiment Analysis — market psychology before causal reasoning
     # -----------------------------------------------------------------------
-    print("\n[STEP 2] Causal Reasoning Analysis")
+    print("\n[STEP 2] Sentiment Analysis")
+    sentiment_report = None
+    try:
+        from agents.sentiment import SentimentAgent
+        sentiment_agent = SentimentAgent()
+        sentiment_report = sentiment_agent.analyse(run_id=run_id, save=True)
+        emotion = sentiment_report.get("market_emotion", "unknown")
+        score = sentiment_report.get("fear_greed_score", 50)
+        print(f"  → Market emotion: {emotion} (fear/greed: {score}/100)")
+    except Exception as e:
+        print(f"  [WARNING] Sentiment analysis failed: {e} — continuing without it")
+
+    # -----------------------------------------------------------------------
+    # Step 2b: Narrative Cycle Analysis
+    # -----------------------------------------------------------------------
+    print("\n[STEP 2b] Narrative Cycle Analysis")
+    try:
+        from agents.narrative_cycle import NarrativeCycleAgent
+        narrative_agent = NarrativeCycleAgent()
+        narrative_results = narrative_agent.analyse(run_id=run_id)
+        for nr in narrative_results:
+            phase = nr.get("current_phase", "unknown")
+            theme = nr.get("theme", "?")
+            print(f"  → {theme}: {phase}")
+    except Exception as e:
+        print(f"  [WARNING] Narrative cycle analysis failed: {e} — continuing without it")
+
+    # -----------------------------------------------------------------------
+    # Step 3: Causal Reasoning — root cause 3-4 levels deep
+    # -----------------------------------------------------------------------
+    print("\n[STEP 3] Causal Reasoning Analysis")
     from agents.causal_reasoning import CausalReasoningAgent
     causal_agent = CausalReasoningAgent()
 
     # Analyse top 5 themes by urgency (avoid burning too many LLM calls)
     top_themes = sorted(themes, key=lambda t: t.urgency, reverse=True)[:5]
-    theses = causal_agent.analyse(top_themes, run_id=run_id)
+    theses = causal_agent.analyse(top_themes, run_id=run_id, sentiment_report=sentiment_report)
     print(f"  → {len(theses)} causal theses produced")
 
     # -----------------------------------------------------------------------
-    # Step 3: Screener — filter stock universe
+    # Step 4: Screener — filter stock universe
     # -----------------------------------------------------------------------
-    print("\n[STEP 3] Stock Screener")
+    print("\n[STEP 4] Stock Screener")
     from agents.screener import ScreenerAgent
     screener = ScreenerAgent()
     candidates = screener.screen(theses, run_id=run_id)
@@ -121,7 +151,7 @@ def main():
         print(f"     Top 5: {', '.join(top_tickers)}")
 
     # -----------------------------------------------------------------------
-    # Step 4: Deep analysis — 4 agents per stock
+    # Step 5: Deep analysis — 4 agents per stock
     # -----------------------------------------------------------------------
     import yaml
     cfg_path = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -130,7 +160,7 @@ def main():
     max_deep = cfg["screening"]["max_deep_analyse"]
 
     analyse_list = candidates[:max_deep]
-    print(f"\n[STEP 4] Deep Analysis ({len(analyse_list)} stocks)")
+    print(f"\n[STEP 5] Deep Analysis ({len(analyse_list)} stocks)")
 
     for i, candidate in enumerate(analyse_list, 1):
         ticker = candidate["ticker"]
@@ -138,9 +168,9 @@ def main():
         run_analysis_crew_for_ticker(ticker, theses, run_id)
 
     # -----------------------------------------------------------------------
-    # Step 5: Ranking — final picks by horizon
+    # Step 6: Ranking — final picks by horizon
     # -----------------------------------------------------------------------
-    print("\n[STEP 5] Ranking & Synthesis")
+    print("\n[STEP 6] Ranking & Synthesis")
     from agents.ranking import RankingAgent
     ranking_agent = RankingAgent()
     report = ranking_agent.rank(run_id=run_id)
@@ -150,9 +180,9 @@ def main():
         print(f"  → Market Regime: {report.market_regime.label}")
 
     # -----------------------------------------------------------------------
-    # Step 6: Deliver report
+    # Step 7: Deliver report
     # -----------------------------------------------------------------------
-    print("\n[STEP 6] Delivering Report")
+    print("\n[STEP 7] Delivering Report")
     from tools.delivery import deliver_report
     deliver_report(report.to_mongo())
 

@@ -32,6 +32,27 @@ class Signal(BaseModel):
     is_contrarian: bool = False
     created_at: str = ""
 
+    # Price at signal creation — required for verification
+    price_at_signal: Optional[float] = None
+
+    # 30-day verification
+    verified_30d: bool = False
+    price_30d_later: Optional[float] = None
+    return_30d_pct: Optional[float] = None
+    signal_correct_30d: Optional[bool] = None
+
+    # 90-day verification
+    verified_90d: bool = False
+    price_90d_later: Optional[float] = None
+    return_90d_pct: Optional[float] = None
+    signal_correct_90d: Optional[bool] = None
+
+    # 180-day verification
+    verified_180d: bool = False
+    price_180d_later: Optional[float] = None
+    return_180d_pct: Optional[float] = None
+    signal_correct_180d: Optional[bool] = None
+
     def to_mongo(self) -> dict:
         d = self.model_dump()
         d["signal"] = self.signal.value

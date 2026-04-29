@@ -15,6 +15,11 @@ class Collections:
     SCREENER_RESULTS = "screener_results"
     WORLD_THEMES = "world_themes"
     EMBEDDINGS = "embeddings"
+    ACCURACY_SCORECARD = "accuracy_scorecard"
+    CROSSOVER_DATA = "crossover_data"
+    SENTIMENT_HISTORY = "sentiment_history"
+    NARRATIVE_CYCLES = "narrative_cycles"
+    GOOGLE_TRENDS = "google_trends_history"
 
 
 # Every document written by agents carries these top-level fields.
@@ -55,4 +60,20 @@ def ensure_indexes() -> None:
     db[Collections.SCREENER_RESULTS].create_indexes([
         IndexModel([("run_id", DESCENDING)]),
         IndexModel([("ticker", ASCENDING)]),
+    ])
+    db[Collections.ACCURACY_SCORECARD].create_indexes([
+        IndexModel([("run_date", DESCENDING)]),
+        IndexModel([("horizon", ASCENDING)]),
+    ])
+    db[Collections.CROSSOVER_DATA].create_indexes([
+        IndexModel([("date", DESCENDING)]),
+    ])
+    db[Collections.SENTIMENT_HISTORY].create_indexes([
+        IndexModel([("captured_at", DESCENDING)]),
+    ])
+    db[Collections.NARRATIVE_CYCLES].create_indexes([
+        IndexModel([("theme", ASCENDING), ("captured_at", DESCENDING)]),
+    ])
+    db[Collections.GOOGLE_TRENDS].create_indexes([
+        IndexModel([("keyword", ASCENDING), ("captured_at", DESCENDING)]),
     ])
