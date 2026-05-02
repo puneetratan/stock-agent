@@ -106,7 +106,13 @@ def main():
     run_id = str(uuid.uuid4())
     start_time = datetime.now(timezone.utc)
 
-    log_file = os.path.join(
+    # Accept --log-file=<path> so the scheduler can tell us which file it redirected
+    # stdout to — that path is what the watchdog monitors for staleness.
+    _cli_log_file = None
+    for _arg in sys.argv[1:]:
+        if _arg.startswith("--log-file="):
+            _cli_log_file = _arg.split("=", 1)[1]
+    log_file = _cli_log_file or os.path.join(
         os.path.dirname(__file__),
         f"run_{start_time.strftime('%Y%m%d_%H%M%S')}.log",
     )

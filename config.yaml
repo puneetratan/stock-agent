@@ -8,21 +8,8 @@ screening:
   universe: "GLOBAL"          # GLOBAL or US-only
   regions:                    # comment out any region to exclude it
     - US
-    - JAPAN
-    - KOREA
-    - TAIWAN
-    - CHINA
     - INDIA
-    - AUSTRALIA
-    - UK
-    - GERMANY
-    - FRANCE
-    - NETHERLANDS
-    - SWITZERLAND
-    - SPAIN
-    - CANADA
-    - BRAZIL
-    - DENMARK
+    # other regions excluded from screening — macro intel still covers them globally
   max_candidates: 80          # stocks passing Stage 1 screener (more universe = higher cap)
   max_deep_analyse: 20        # stocks getting full 4-agent treatment
   min_market_cap_m: 500       # minimum market cap in millions (USD equivalent)

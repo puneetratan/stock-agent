@@ -10,12 +10,21 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from bson import ObjectId
 from crewai import Agent, Task, Crew, Process
 
 from db import get_collection
 from db.collections import Collections
 from models import FinalReport, HorizonPicks, Signal, SignalType, MarketRegime
 from tools.bedrock import get_llm
+
+
+def _json_default(obj):
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 def _repair_json(raw: str) -> dict:
@@ -168,14 +177,14 @@ class RankingAgent:
                     for r in all_reports.get("geo_reports", [])
                 ],
             }
-            reports_json = json.dumps(slim, indent=2)
+            reports_json = json.dumps(slim, indent=2, default=_json_default)
 
-        sentiment_json = json.dumps(sentiment_report or {}, indent=2)[:1500]
-        narrative_json = json.dumps(narrative_phases or {}, indent=2)[:1500]
+        sentiment_json = json.dumps(sentiment_report or {}, indent=2, default=_json_default)[:1500]
+        narrative_json = json.dumps(narrative_phases or {}, indent=2, default=_json_default)[:1500]
 
         task = Task(
             description=_RANKING_PROMPT.format(
-                causal_theses=json.dumps(causal_theses, indent=2)[:8000],
+                causal_theses=json.dumps(causal_theses, indent=2, default=_json_default)[:8000],
                 sentiment_report=sentiment_json,
                 narrative_phases=narrative_json,
                 all_reports=reports_json[:40000],

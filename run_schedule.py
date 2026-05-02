@@ -9,9 +9,10 @@ Keep this process alive in a tmux session or systemd service.
 
 import logging
 import os
+import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytz
 import schedule
@@ -27,9 +28,13 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
+VENV_PYTHON = os.path.join(BASE_DIR, ".venv", "bin", "python")
+AGENT_SCRIPT = os.path.join(BASE_DIR, "run_agent.py")
+
 
 def _load_config() -> dict:
-    cfg_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    cfg_path = os.path.join(BASE_DIR, "config.yaml")
     with open(cfg_path) as f:
         return yaml.safe_load(f)
 
@@ -40,21 +45,6 @@ def _is_weekday() -> bool:
     return now_et.weekday() < 5   # 0=Monday … 4=Friday
 
 
-def _start_watchdog() -> None:
-    """Start the watchdog as a background subprocess."""
-    import subprocess
-    script = os.path.join(os.path.dirname(__file__), "watchdog.py")
-    venv_python = os.path.join(os.path.dirname(__file__), ".venv", "bin", "python")
-    watchdog_log = os.path.join(os.path.dirname(__file__), "watchdog.log")
-    with open(watchdog_log, "a") as out:
-        proc = subprocess.Popen(
-            [venv_python, script],
-            stdout=out, stderr=out,
-            start_new_session=True,
-        )
-    log.info(f"Watchdog started — PID {proc.pid}")
-
-
 def run_job():
     """Called by the scheduler at the configured time."""
     cfg = _load_config()
@@ -62,14 +52,21 @@ def run_job():
         log.info("Skipping — today is a weekend")
         return
 
-    _start_watchdog()
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    log_file  = os.path.join(BASE_DIR, f"run_{timestamp}.log")
+
     log.info("Starting scheduled intelligence run")
     try:
-        from run_agent import main
-        report = main()
-        log.info(f"Run complete — {report.total_signals} signals, run_id={report.run_id}")
+        with open(log_file, "w") as out:
+            proc = subprocess.Popen(
+                [VENV_PYTHON, AGENT_SCRIPT, f"--log-file={log_file}"],
+                stdout=out, stderr=out,
+                start_new_session=True,
+            )
+        log.info(f"Pipeline spawned — PID {proc.pid}, log: {log_file}")
+        log.info("Watchdog is monitoring independently (com.stockintelligence.watchdog)")
     except Exception as e:
-        log.error(f"Run failed: {e}", exc_info=True)
+        log.error(f"Failed to spawn pipeline: {e}", exc_info=True)
 
 
 def run_verification_job():
