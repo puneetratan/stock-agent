@@ -17,6 +17,7 @@ from db import get_collection
 from db.collections import Collections
 from models import FinalReport, HorizonPicks, Signal, SignalType, MarketRegime
 from tools.bedrock import get_llm
+from tools.skill_loader import load_skill
 
 
 def _json_default(obj):
@@ -135,6 +136,7 @@ class RankingAgent:
     """Synthesises all agent outputs into the final ranked report."""
 
     def __init__(self):
+        self.skill = load_skill("ranking")
         self._llm = get_llm("ranking")
 
     def _build_crew(self, causal_theses: list[dict], all_reports: dict, sentiment_report: dict | None = None, narrative_phases: dict | None = None) -> Crew:
@@ -183,7 +185,7 @@ class RankingAgent:
         narrative_json = json.dumps(narrative_phases or {}, indent=2, default=_json_default)[:1500]
 
         task = Task(
-            description=_RANKING_PROMPT.format(
+            description=self.skill + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nNOW APPLY YOUR SKILL TO SYNTHESISE ALL REPORTS:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" + _RANKING_PROMPT.format(
                 causal_theses=json.dumps(causal_theses, indent=2, default=_json_default)[:8000],
                 sentiment_report=sentiment_json,
                 narrative_phases=narrative_json,

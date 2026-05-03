@@ -29,6 +29,12 @@ if missing:
     sys.exit(1)
 
 
+def validate_skills():
+    """Ensure all skill files are present before the run starts."""
+    from tools.skill_loader import validate_all_skills
+    validate_all_skills()
+
+
 def ensure_indexes():
     """Bootstrap MongoDB indexes on first run."""
     try:
@@ -123,6 +129,7 @@ def main():
     print(f"Started: {start_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print(f"{'='*60}\n")
 
+    validate_skills()
     ensure_indexes()
 
     # -----------------------------------------------------------------------

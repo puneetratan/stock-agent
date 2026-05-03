@@ -16,6 +16,7 @@ from db import get_collection
 from db.collections import Collections
 from models import Theme
 from tools.bedrock import get_llm
+from tools.skill_loader import load_skill
 
 
 _BACKSTORY = """
@@ -72,6 +73,7 @@ class CausalReasoningAgent:
     """Performs root-cause analysis on world themes."""
 
     def __init__(self):
+        self.skill = load_skill("causal_reasoning")
         self._llm = get_llm("causal")
 
     def _build_crew(self, theme: Theme, macro_context: str) -> Crew:
@@ -90,7 +92,11 @@ class CausalReasoningAgent:
 
         task = Task(
             description=f"""
-{_SYSTEM_PROMPT}
+{self.skill}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NOW APPLY YOUR SKILL TO THIS THEME:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 THEME TO ANALYSE:
 ID: {theme.id}
@@ -102,7 +108,7 @@ Evidence: {json.dumps(theme.evidence)}
 CURRENT MACRO CONTEXT:
 {macro_context}
 
-Perform 4-level causal analysis. Output only valid JSON.
+Execute all 8 steps of your analytical framework. Output only valid JSON matching the schema above.
             """,
             agent=agent,
             expected_output="JSON object with causal analysis and theses per horizon",

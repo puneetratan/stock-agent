@@ -6,6 +6,7 @@ that will drive market opportunities over the next days-to-months.
 """
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -15,6 +16,7 @@ from db import get_collection
 from db.collections import Collections
 from models import Theme, ThemeStatus
 from tools.bedrock import get_llm
+from tools.skill_loader import load_skill
 
 
 _BACKSTORY = """
@@ -61,6 +63,7 @@ class WorldIntelligenceAgent:
     """Orchestrates the world intelligence scanning crew."""
 
     def __init__(self):
+        self.skill = load_skill("world_intelligence")
         self._llm = get_llm("world")
 
     def _build_crew(self, news_context: str) -> Crew:
@@ -79,12 +82,16 @@ class WorldIntelligenceAgent:
 
         task = Task(
             description=f"""
-{_SYSTEM_PROMPT}
+{self.skill}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NOW APPLY YOUR SKILL TO TODAY'S DATA:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Today's news context:
 {news_context}
 
-Identify and rank macro themes. Output only valid JSON.
+Identify and rank macro themes. Output only valid JSON matching the schema above.
             """,
             agent=agent,
             expected_output="JSON object with a 'themes' array",
@@ -147,6 +154,65 @@ Identify and rank macro themes. Output only valid JSON.
         except Exception:
             return []
 
+    @staticmethod
+    def _parse_json_tolerant(raw: str) -> dict | None:
+        """
+        Parse JSON that may be truncated (LLM hit token limit mid-response).
+        Tries clean parse first, then progressively repairs truncated output.
+        """
+        # 1. Clean parse
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+
+        # 2. Find outermost { ... }
+        start = raw.find("{")
+        if start < 0:
+            return None
+        # Try from last } backwards
+        for end in range(len(raw), start, -1):
+            if raw[end - 1] == "}":
+                try:
+                    return json.loads(raw[start:end])
+                except json.JSONDecodeError:
+                    continue
+
+        # 3. Response was truncated inside the themes array — recover complete themes
+        # Find the "themes" array start and extract only fully-closed objects
+        themes_match = re.search(r'"themes"\s*:\s*\[', raw)
+        if not themes_match:
+            return None
+
+        array_start = themes_match.end() - 1  # position of '['
+        themes = []
+        depth = 0
+        obj_start = None
+
+        for i, ch in enumerate(raw[array_start:], start=array_start):
+            if ch == "{":
+                if depth == 1:  # start of a top-level theme object
+                    obj_start = i
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 1 and obj_start is not None:  # closed a theme object
+                    try:
+                        themes.append(json.loads(raw[obj_start:i + 1]))
+                    except json.JSONDecodeError:
+                        pass
+                    obj_start = None
+            elif ch == "[":
+                depth += 1
+            elif ch == "]" and depth == 1:
+                break  # clean end of array
+
+        if themes:
+            print(f"[WorldIntelligenceAgent] Recovered {len(themes)} themes from truncated JSON")
+            return {"themes": themes}
+
+        return None
+
     def scan(self, run_id: str | None = None) -> list[Theme]:
         """
         Run the world intelligence scan.
@@ -170,22 +236,15 @@ Identify and rank macro themes. Output only valid JSON.
 
         # Parse JSON output from the agent
         raw_text = str(result)
-        try:
-            # Extract JSON if wrapped in markdown code block
-            if "```json" in raw_text:
-                raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in raw_text:
-                raw_text = raw_text.split("```")[1].split("```")[0].strip()
-            data = json.loads(raw_text)
-        except (json.JSONDecodeError, IndexError):
-            # Fallback: try to find JSON object in output
-            start = raw_text.find("{")
-            end = raw_text.rfind("}") + 1
-            if start >= 0 and end > start:
-                data = json.loads(raw_text[start:end])
-            else:
-                print(f"[WorldIntelligenceAgent] Failed to parse JSON: {raw_text[:200]}")
-                return []
+        if "```json" in raw_text:
+            raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in raw_text:
+            raw_text = raw_text.split("```")[1].split("```")[0].strip()
+
+        data = self._parse_json_tolerant(raw_text)
+        if data is None:
+            print(f"[WorldIntelligenceAgent] Failed to parse JSON: {raw_text[:200]}")
+            return []
 
         themes = []
         col = get_collection(Collections.WORLD_THEMES)

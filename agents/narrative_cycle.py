@@ -19,6 +19,7 @@ from crewai import Agent, Crew, Process, Task
 from db import get_collection
 from db.collections import Collections
 from tools.bedrock import get_llm
+from tools.skill_loader import load_skill
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ class NarrativeCycleAgent:
     """Tracks hype cycle phase for each investment theme."""
 
     def __init__(self):
+        self.skill = load_skill("narrative_cycle")
         self._llm = get_llm("narrative")
 
     def _gather_theme_data(self, theme: dict) -> dict:
@@ -127,7 +129,11 @@ class NarrativeCycleAgent:
 
         task = Task(
             description=f"""
-{_SYSTEM_PROMPT}
+{self.skill}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NOW APPLY YOUR SKILL TO THIS THEME:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 THEME: {theme['id']} — {theme['name']}
 
@@ -143,7 +149,7 @@ REDDIT SENTIMENT:
 HISTORICAL PHASE READINGS:
 {json.dumps(theme_data.get('history', []), indent=2)[:400]}
 
-Determine current hype cycle phase. Output only valid JSON.
+Apply all 6 data points from your phase detection protocol. Output only valid JSON matching the schema above.
             """,
             agent=agent,
             expected_output="JSON hype cycle phase assessment for this theme",

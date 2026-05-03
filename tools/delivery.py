@@ -117,8 +117,38 @@ def _deliver_terminal(report: dict) -> None:
     print(json.dumps(report, indent=2))
 
 
+def _already_delivered(run_id: str) -> bool:
+    """Return True if this run_id was already delivered. Marks it as delivered on first call."""
+    if not run_id:
+        return False
+    try:
+        from db import get_collection
+        col = get_collection("delivery_log")
+        result = col.find_one_and_update(
+            {"run_id": run_id},
+            {"$setOnInsert": {"run_id": run_id, "delivered_at": __import__("datetime").datetime.utcnow()}},
+            upsert=True,
+            return_document=False,  # returns the doc BEFORE the update (None = was not there)
+        )
+        if result is not None:
+            print(f"[delivery] Skipping — run {run_id[:8]} already delivered")
+            return True
+        return False
+    except Exception as e:
+        print(f"[delivery] delivery_log check failed ({e}) — proceeding with delivery")
+        return False
+
+
 def deliver_report(report: dict, method: str | None = None) -> None:
-    """Dispatch report via configured delivery method."""
+    """
+    Dispatch report via configured delivery method.
+    Guaranteed to send exactly ONE email per run_id regardless of how many
+    scripts call this (run_agent, resume_from_ticker, finalize_run).
+    """
+    run_id = report.get("run_id", "")
+    if _already_delivered(run_id):
+        return
+
     if method is None:
         import yaml
         cfg_path = os.path.join(os.path.dirname(__file__), "..", "config.yaml")

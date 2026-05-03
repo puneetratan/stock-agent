@@ -18,6 +18,12 @@ from agents.market import MARKET_TASK_DESCRIPTION, build_market_agent
 from agents.news import NEWS_TASK_DESCRIPTION, build_news_agent
 from db import get_collection
 from db.collections import Collections
+from tools.skill_loader import load_skill as _load_skill
+
+_SKILL_MARKET = _load_skill("market_analysis")
+_SKILL_NEWS = _load_skill("news_analysis")
+_SKILL_FUNDAMENTALS = _load_skill("fundamentals_analysis")
+_SKILL_GEO = _load_skill("geo_analysis")
 
 
 def _prefetch_market_data(ticker: str) -> dict:
@@ -127,9 +133,11 @@ def build_analysis_crew(ticker: str, theses: list[dict], run_id: str) -> Crew:
     fundamentals_agent = build_fundamentals_agent()
     geo_agent = build_geo_agent()
 
+    _sep = "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nNOW APPLY YOUR SKILL TO THIS DATA:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
     # Define tasks with pre-fetched data embedded
     market_task = Task(
-        description=MARKET_TASK_DESCRIPTION.format(
+        description=_SKILL_MARKET + _sep + MARKET_TASK_DESCRIPTION.format(
             ticker=ticker,
             price_history=json.dumps(market_data.get("price_history", {}))[:2000],
             rsi=market_data.get("rsi", {}),
@@ -143,7 +151,7 @@ def build_analysis_crew(ticker: str, theses: list[dict], run_id: str) -> Crew:
     )
 
     news_task = Task(
-        description=NEWS_TASK_DESCRIPTION.format(
+        description=_SKILL_NEWS + _sep + NEWS_TASK_DESCRIPTION.format(
             ticker=ticker,
             headlines=json.dumps(news_data.get("headlines", []))[:3000],
             analyst_ratings=json.dumps(news_data.get("analyst_ratings", {})),
@@ -155,7 +163,7 @@ def build_analysis_crew(ticker: str, theses: list[dict], run_id: str) -> Crew:
     )
 
     fundamentals_task = Task(
-        description=FUNDAMENTALS_TASK_DESCRIPTION.format(
+        description=_SKILL_FUNDAMENTALS + _sep + FUNDAMENTALS_TASK_DESCRIPTION.format(
             ticker=ticker,
             news_report="{news_task_output}",  # CrewAI injects previous task output
             income_statements=json.dumps(funds_data.get("income_statements", {}))[:3000],
@@ -171,7 +179,7 @@ def build_analysis_crew(ticker: str, theses: list[dict], run_id: str) -> Crew:
     )
 
     geo_task = Task(
-        description=GEO_TASK_DESCRIPTION.format(
+        description=_SKILL_GEO + _sep + GEO_TASK_DESCRIPTION.format(
             ticker=ticker,
             causal_theses=causal_theses_json,
             fed_rate=json.dumps(geo_data.get("fed_rate", {})),

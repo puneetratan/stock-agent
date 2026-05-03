@@ -15,6 +15,7 @@ from crewai import Agent, Crew, Process, Task
 from db import get_collection
 from db.collections import Collections
 from tools.bedrock import get_llm
+from tools.skill_loader import load_skill
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ class SentimentAgent:
     """Measures market psychology and sentiment across fear/greed dimensions."""
 
     def __init__(self):
+        self.skill = load_skill("sentiment")
         self._llm = get_llm("sentiment")
 
     def _gather_sentiment_data(self) -> dict:
@@ -134,7 +136,11 @@ class SentimentAgent:
 
         task = Task(
             description=f"""
-{_SYSTEM_PROMPT}
+{self.skill}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NOW APPLY YOUR SKILL TO THIS DATA:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 CURRENT SENTIMENT DATA:
 VIX: {json.dumps(sentiment_data.get('vix', {}), indent=2)[:500]}

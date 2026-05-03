@@ -16,6 +16,7 @@ from crewai import Agent, Task, Crew, Process
 from db import get_collection
 from db.collections import Collections
 from tools.bedrock import get_llm
+from tools.skill_loader import load_skill
 import tools.yfinance_client as yfc
 
 
@@ -188,6 +189,7 @@ class ScreenerAgent:
     """Three-stage stock screener driven by causal theses."""
 
     def __init__(self):
+        self.skill = load_skill("screener")
         self._llm = get_llm("screener")
 
     def _stage_a_quantitative(self, tickers: list[str], cfg: dict) -> list[dict]:
@@ -276,7 +278,11 @@ class ScreenerAgent:
 
         task = Task(
             description=f"""
-For each stock in the candidates list, score its alignment with the active macro theses.
+{self.skill}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NOW APPLY YOUR SKILL TO THESE STOCKS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ACTIVE MACRO THESES:
 {themes_json}
