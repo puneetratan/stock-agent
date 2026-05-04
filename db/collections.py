@@ -21,6 +21,9 @@ class Collections:
     NARRATIVE_CYCLES = "narrative_cycles"
     GOOGLE_TRENDS = "google_trends_history"
     RUN_METADATA  = "run_metadata"
+    POLITICIAN_TRADES = "politician_trades"
+    SKILL_SUGGESTIONS = "skill_suggestions"
+    DELIVERY_LOG = "delivery_log"
 
 
 # Every document written by agents carries these top-level fields.
@@ -81,4 +84,10 @@ def ensure_indexes() -> None:
     db[Collections.RUN_METADATA].create_indexes([
         IndexModel([("run_id", ASCENDING), ("status", ASCENDING)]),
         IndexModel([("started_at", DESCENDING)]),
+    ])
+    db[Collections.POLITICIAN_TRADES].create_indexes([
+        IndexModel([("ticker", ASCENDING), ("trade_date", DESCENDING)]),
+        IndexModel([("politician", ASCENDING)]),
+        IndexModel([("signal_strength", ASCENDING)]),
+        IndexModel([("fetched_at", DESCENDING)]),
     ])

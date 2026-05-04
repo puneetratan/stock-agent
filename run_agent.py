@@ -163,17 +163,18 @@ def main():
         print(f"  [WARNING] Sentiment analysis failed: {e} — continuing without it")
 
     # -----------------------------------------------------------------------
-    # Step 2b: Narrative Cycle Analysis
+    # Step 2b: Narrative Cycle Analysis — use themes from step 1 directly
     # -----------------------------------------------------------------------
     print("\n[STEP 2b] Narrative Cycle Analysis")
     try:
         from agents.narrative_cycle import NarrativeCycleAgent
         narrative_agent = NarrativeCycleAgent()
-        narrative_results = narrative_agent.analyse(run_id=run_id)
+        theme_dicts = [{"id": t.id, "name": t.name} for t in themes]
+        narrative_results = narrative_agent.analyse(themes=theme_dicts, run_id=run_id)
         for nr in narrative_results:
             phase = nr.get("current_phase", "unknown")
-            theme = nr.get("theme", "?")
-            print(f"  → {theme}: {phase}")
+            theme_id = nr.get("theme", "?")
+            print(f"  → {theme_id}: {phase}")
     except Exception as e:
         print(f"  [WARNING] Narrative cycle analysis failed: {e} — continuing without it")
 

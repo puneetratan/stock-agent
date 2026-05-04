@@ -59,6 +59,39 @@ STEP 5 — MARKET OPEN CONTEXT
   European markets: what is moving pre-US open?
   Currency moves: any significant USD moves?
 
+STEP 6 — POLITICIAN TRADE SCAN
+  Check congressional disclosures from last 45 days.
+  Use politician_trades collection (fetched by intelligence_mcp).
+
+  COMMITTEE INTERPRETATION:
+    Science & Technology → technology, semiconductors, AI
+    Armed Services       → defence, aerospace, cybersecurity
+    Finance / Banking    → financials, insurance, REITs
+    Energy               → oil, gas, renewables, utilities
+    Intelligence         → cybersecurity, surveillance tech
+    Commerce             → retail, e-commerce, telecoms
+    Health               → pharma, biotech, health insurance
+    Judiciary            → legal tech, cannabis legalisation
+    Foreign Relations    → emerging markets, defence primes
+    Agriculture          → agri commodities, fertilisers
+
+  SIGNAL SCORING:
+    Disclosure delay < 15 days  → signal_strength = HIGH
+    Disclosure delay 15-30 days → signal_strength = MEDIUM
+    Disclosure delay > 30 days  → signal_strength = LOW
+    Cross-party buy same sector → upgrade strength by one level
+
+  CLUSTERING DETECTION:
+    3+ politicians buying same sector → STRONG cluster signal
+    Cross-party cluster (D + R both)  → strongest possible signal
+    Single politician, committee match → sector-specific signal
+
+  ANALYSIS QUESTIONS:
+    What sectors are politicians buying THIS week?
+    Is this aligned with or contrary to your theme analysis?
+    Is there a cluster that implies non-public information?
+    Which committee matches explain the sector bets?
+
 ## THEME CLASSIFICATION
 Classify every theme by:
   Status:   hot | warm | cooling | new | dead
@@ -90,7 +123,28 @@ Never deviate. Ranking agent depends on this format.
   "overnight_summary": "What happened while US market was closed",
   "top_3_urgency": ["theme_id_1", "theme_id_2", "theme_id_3"],
   "new_this_run": ["theme_ids that are new"],
-  "dead_this_run": ["theme_ids that have resolved"]
+  "dead_this_run": ["theme_ids that have resolved"],
+  "politician_signals": [
+    {
+      "ticker": "string",
+      "politician": "string",
+      "party": "D|R",
+      "committee": "string",
+      "transaction_type": "buy|sell",
+      "signal_strength": "HIGH|MEDIUM|LOW",
+      "sector_match": true,
+      "disclosure_delay_days": 12
+    }
+  ],
+  "politician_clustering": [
+    {
+      "sector": "string",
+      "politicians": ["list of names"],
+      "transaction_type": "buy|sell",
+      "cross_party": false,
+      "cluster_strength": "STRONG|MODERATE|WEAK"
+    }
+  ]
 }
 
 ## QUALITY CHECKLIST
@@ -100,5 +154,7 @@ Before returning verify:
   ✓ Urgency scores are justified not random
   ✓ New themes genuinely new (not repackaged old ones)
   ✓ Dead themes explicitly marked (cleanup matters)
+  ✓ Politician trade data checked (populate empty arrays if no data)
+  ✓ Cluster signals flagged if 3+ politicians in same sector
   ✓ Output is valid JSON
   ✓ No themes missing required fields

@@ -168,8 +168,8 @@ Apply all 6 data points from your phase detection protocol. Output only valid JS
             # Try to load active themes from MongoDB, fall back to defaults
             try:
                 col = get_collection(Collections.WORLD_THEMES)
-                raw = list(col.find({}, {"_id": 0, "theme_id": 1, "name": 1}, sort=[("urgency", -1)], limit=8))
-                themes = [{"id": t.get("theme_id", "UNKNOWN"), "name": t.get("name", "Unknown")} for t in raw if t.get("name")]
+                raw = list(col.find({}, {"_id": 0, "id": 1, "name": 1}, sort=[("urgency", -1)], limit=8))
+                themes = [{"id": t.get("id", "UNKNOWN"), "name": t.get("name", "Unknown")} for t in raw if t.get("name")]
                 if not themes:
                     themes = DEFAULT_THEMES
             except Exception:

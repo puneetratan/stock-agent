@@ -123,7 +123,8 @@ def _already_delivered(run_id: str) -> bool:
         return False
     try:
         from db import get_collection
-        col = get_collection("delivery_log")
+        from db.collections import Collections
+        col = get_collection(Collections.DELIVERY_LOG)
         result = col.find_one_and_update(
             {"run_id": run_id},
             {"$setOnInsert": {"run_id": run_id, "delivered_at": __import__("datetime").datetime.utcnow()}},

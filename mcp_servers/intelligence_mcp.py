@@ -4,11 +4,15 @@ MCP server: intelligence_mcp — wraps NewsAPI, SEC EDGAR, FRED, and web search.
 Each tool: (1) calls external API, (2) saves raw data to MongoDB, (3) returns processed data.
 """
 
+import logging
 import os
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 
 import requests
 from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 from db import get_collection
 from db.collections import Collections
@@ -342,6 +346,176 @@ def web_search(query: str) -> list[dict]:
         ]
     except Exception as e:
         return [{"error": str(e)}]
+
+
+@mcp.tool()
+def get_politician_trades(days: int = 45) -> dict:
+    """
+    Fetch recent congressional stock trade disclosures.
+    Free public data — no API key needed.
+    Under STOCK Act: House discloses within 45 days, Senate within 30 days.
+    Returns trades enriched with committee assignments, disclosure delay,
+    signal strength, sector relevance, and clustering detection.
+    """
+
+    COMMITTEE_SECTOR_MAP = {
+        "Science & Technology": ["technology", "semiconductors", "AI"],
+        "Armed Services":       ["defence", "aerospace", "cybersecurity"],
+        "Banking":              ["financials", "real_estate"],
+        "Energy":               ["oil_gas", "renewables", "utilities"],
+        "Foreign Relations":    ["defence", "commodities", "macro"],
+        "Health":               ["healthcare", "pharma", "biotech"],
+        "Commerce":             ["technology", "consumer", "telecoms"],
+        "Finance":              ["healthcare", "tax_policy"],
+        "Judiciary":            ["technology", "antitrust"],
+        "Intelligence":         ["cybersecurity", "defence"],
+    }
+
+    COMMITTEE_MAP = {
+        "Nancy Pelosi":     ["Science & Technology"],
+        "Dan Crenshaw":     ["Armed Services", "Intelligence"],
+        "Tommy Tuberville": ["Armed Services"],
+        "Mark Warner":      ["Banking", "Intelligence"],
+        "Bill Hagerty":     ["Banking", "Foreign Relations"],
+        "Ro Khanna":        ["Science & Technology", "Armed Services"],
+        "Michael McCaul":   ["Foreign Relations"],
+        "Patrick McHenry":  ["Banking"],
+        "Raul Grijalva":    ["Energy"],
+        "Joe Manchin":      ["Energy"],
+    }
+
+    all_trades = []
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    def _parse_date(s: str) -> datetime | None:
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
+            try:
+                return datetime.strptime(s, fmt)
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    def _signal_strength(delay: int | None, chamber: str) -> str:
+        if delay is None:
+            return "unknown"
+        threshold_high   = 40 if chamber == "house" else 25
+        threshold_medium = 20 if chamber == "house" else 15
+        if delay >= threshold_high:
+            return "high"
+        if delay >= threshold_medium:
+            return "medium"
+        return "low"
+
+    def _enrich(trade: dict, chamber: str) -> dict | None:
+        ticker = trade.get("ticker", "").strip().upper()
+        if not ticker or ticker == "--":
+            return None
+
+        trade_date       = _parse_date(trade.get("transaction_date", ""))
+        disclosure_date  = _parse_date(trade.get("disclosure_date", ""))
+        if trade_date is None or trade_date < cutoff:
+            return None
+
+        delay = (disclosure_date - trade_date).days if disclosure_date else None
+
+        politician  = trade.get("representative") or trade.get("senator", "Unknown")
+        committees  = COMMITTEE_MAP.get(politician, ["Unknown"])
+        sectors     = list({
+            s
+            for c in committees
+            for s in COMMITTEE_SECTOR_MAP.get(c, [])
+        })
+
+        return {
+            "politician":        politician,
+            "chamber":           chamber,
+            "ticker":            ticker,
+            "action":            trade.get("type", "").lower(),
+            "amount_range":      trade.get("amount", "Unknown"),
+            "trade_date":        trade.get("transaction_date"),
+            "disclosure_date":   trade.get("disclosure_date"),
+            "delay_days":        delay,
+            "signal_strength":   _signal_strength(delay, chamber),
+            "committees":        committees,
+            "relevant_sectors":  sectors,
+            "asset_description": trade.get("asset_description", ""),
+        }
+
+    # ── House trades ─────────────────────────────────────────────────────────
+    try:
+        r = requests.get(
+            "https://house-stock-watcher-data.s3-us-east-2.amazonaws.com"
+            "/data/all_transactions.json",
+            timeout=15,
+        )
+        r.raise_for_status()
+        for t in r.json():
+            enriched = _enrich(t, "house")
+            if enriched:
+                all_trades.append(enriched)
+    except Exception as e:
+        logger.error(f"[MCP:politician] House fetch failed: {e}")
+
+    # ── Senate trades ─────────────────────────────────────────────────────────
+    try:
+        r = requests.get(
+            "https://senate-stock-watcher-data.s3-us-east-2.amazonaws.com"
+            "/api/transactions",
+            timeout=15,
+        )
+        r.raise_for_status()
+        for t in r.json():
+            enriched = _enrich(t, "senate")
+            if enriched:
+                all_trades.append(enriched)
+    except Exception as e:
+        logger.error(f"[MCP:politician] Senate fetch failed: {e}")
+
+    # ── Clustering detection ──────────────────────────────────────────────────
+    buy_sector_counts  = Counter(
+        s
+        for t in all_trades if "purchase" in t["action"]
+        for s in t["relevant_sectors"]
+    )
+    sell_sector_counts = Counter(
+        s
+        for t in all_trades if "sale" in t["action"]
+        for s in t["relevant_sectors"]
+    )
+    buy_clusters  = {s: c for s, c in buy_sector_counts.items()  if c >= 3}
+    sell_clusters = {s: c for s, c in sell_sector_counts.items() if c >= 3}
+
+    # ── Save to MongoDB ───────────────────────────────────────────────────────
+    if all_trades:
+        try:
+            from db import get_collection
+            col = get_collection(Collections.POLITICIAN_TRADES)
+            col.insert_many([
+                {
+                    **trade,
+                    "fetched_at": datetime.utcnow(),
+                    "run_id":     os.getenv("CURRENT_RUN_ID", "unknown"),
+                }
+                for trade in all_trades
+            ])
+        except Exception as e:
+            logger.error(f"[MCP:politician] MongoDB save failed: {e}")
+
+    logger.info(
+        f"[MCP:politician] {len(all_trades)} trades fetched. "
+        f"Buy clusters: {list(buy_clusters.keys())}. "
+        f"Sell clusters: {list(sell_clusters.keys())}."
+    )
+
+    return {
+        "trades":              all_trades,
+        "total":               len(all_trades),
+        "buy_clustering":      buy_clusters,
+        "sell_clustering":     sell_clusters,
+        "clustering_detected": bool(buy_clusters or sell_clusters),
+        "period_days":         days,
+        "high_signal_trades":  [t for t in all_trades if t["signal_strength"] == "high"],
+    }
 
 
 if __name__ == "__main__":

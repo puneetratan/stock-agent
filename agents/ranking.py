@@ -202,8 +202,6 @@ class RankingAgent:
         Pull all agent reports from MongoDB, synthesise, and produce FinalReport.
         """
         print(f"[RankingAgent] Pulling all reports for run {run_id}")
-        all_reports = get_collection(Collections.MARKET_DATA).database
-        # Fetch all reports via mongo directly
         all_reports_dict = {
             "market_reports": list(get_collection(Collections.MARKET_DATA).find({"run_id": run_id}, {"_id": 0})),
             "news_reports": list(get_collection(Collections.NEWS_SENTIMENT).find({"run_id": run_id}, {"_id": 0})),
