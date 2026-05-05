@@ -581,7 +581,11 @@ Do not change this order without updating CLAUDE.md.
   ├─ 4. WorldIntelligenceAgent.scan()
   │      → themes saved to MongoDB
   │
-  ├─ 5. CausalReasoningAgent.analyse(themes)
+  ├─ 4.5 get_politician_trades(days=45)          ← NEW
+  │      → trades saved to politician_trades collection
+  │      → result passed to CausalReasoningAgent
+  │
+  ├─ 5. CausalReasoningAgent.analyse(themes, politician_trades)
   │      → causal theses saved to MongoDB
   │
   ├─ 6. SentimentAgent.scan()           ← parallel with causal
@@ -756,6 +760,22 @@ v1.1 — 2026-05-03
   correct collections (world_themes, causal_theses, screener_results,
   narrative_cycles for trend/theme questions; market_data/fundamentals/
   geo_macro for ticker-specific technical/fundamental/geo questions)
+
+v1.3 — 2026-05-04
+  Wired get_politician_trades() live data into the pipeline
+
+  run_agent.py: added Step 1.5 — calls get_politician_trades(days=45)
+  immediately after world scan, sets CURRENT_RUN_ID env var so MongoDB
+  save in get_politician_trades() uses the correct run_id
+  Result passed to CausalReasoningAgent.analyse() as politician_trades
+
+  agents/causal_reasoning.py: added _format_politician_context() to
+  convert the raw trades dict into a readable context block injected
+  into every causal crew task — shows high-signal trades (late
+  disclosure), buy/sell clusters by sector, and full recent trade list
+  (capped at 20 rows)
+  analyse() now accepts politician_trades kwarg — graceful fallback if
+  fetch failed (shows "No recent disclosures available" placeholder)
 
 v1.2 — 2026-05-03
   Politician trade intelligence layer added (FEED_AUTOPILOT_POLITICIAN)

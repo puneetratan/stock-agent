@@ -148,6 +148,28 @@ def main():
         sys.exit(1)
 
     # -----------------------------------------------------------------------
+    # Step 1.5: Politician Trade Intelligence — fetch once, share with causal
+    # -----------------------------------------------------------------------
+    print("\n[STEP 1.5] Politician Trade Intelligence")
+    politician_trades = None
+    try:
+        import os as _os
+        _os.environ["CURRENT_RUN_ID"] = run_id
+        from mcp_servers.intelligence_mcp import get_politician_trades
+        politician_trades = get_politician_trades(days=45)
+        total = politician_trades.get("total", 0)
+        high_signal = len(politician_trades.get("high_signal_trades", []))
+        clusters = list(
+            politician_trades.get("buy_clustering", {}).keys()
+            | politician_trades.get("sell_clustering", {}).keys()
+        )
+        print(f"  → {total} trades fetched, {high_signal} high-signal")
+        if clusters:
+            print(f"  → Clusters detected: {', '.join(clusters)}")
+    except Exception as e:
+        print(f"  [WARNING] Politician trade fetch failed: {e} — continuing without it")
+
+    # -----------------------------------------------------------------------
     # Step 2: Sentiment Analysis — market psychology before causal reasoning
     # -----------------------------------------------------------------------
     print("\n[STEP 2] Sentiment Analysis")
@@ -187,7 +209,7 @@ def main():
 
     # Analyse top 5 themes by urgency (avoid burning too many LLM calls)
     top_themes = sorted(themes, key=lambda t: t.urgency, reverse=True)[:5]
-    theses = causal_agent.analyse(top_themes, run_id=run_id, sentiment_report=sentiment_report)
+    theses = causal_agent.analyse(top_themes, run_id=run_id, sentiment_report=sentiment_report, politician_trades=politician_trades)
     print(f"  → {len(theses)} causal theses produced")
 
     # -----------------------------------------------------------------------

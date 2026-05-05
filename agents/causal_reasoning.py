@@ -139,7 +139,45 @@ Execute all 8 steps of your analytical framework. Output only valid JSON matchin
             lines.append(f"FRED data unavailable: {e}")
         return "\n".join(lines) if lines else "Macro data unavailable."
 
-    def analyse(self, themes: list[Theme], run_id: str | None = None, sentiment_report: dict | None = None) -> list[dict]:
+    def _format_politician_context(self, politician_trades: dict) -> str:
+        if not politician_trades or politician_trades.get("total", 0) == 0:
+            return "\nPOLITICIAN TRADES: No recent disclosures available.\n"
+
+        lines = ["\nPOLITICIAN TRADE INTELLIGENCE (live STOCK Act disclosures):"]
+        lines.append(f"  Period: last {politician_trades['period_days']} days | Total trades: {politician_trades['total']}")
+
+        buy_clusters = politician_trades.get("buy_clustering", {})
+        sell_clusters = politician_trades.get("sell_clustering", {})
+        if buy_clusters:
+            lines.append(f"  BUY CLUSTERS (3+ politicians): {buy_clusters}")
+        if sell_clusters:
+            lines.append(f"  SELL CLUSTERS (3+ politicians): {sell_clusters}")
+
+        high_signal = politician_trades.get("high_signal_trades", [])
+        if high_signal:
+            lines.append("  HIGH-SIGNAL TRADES (late disclosure = informed):")
+            for t in high_signal[:10]:
+                lines.append(
+                    f"    {t['politician']} ({', '.join(t['committees'])}) "
+                    f"— {t['action'].upper()} {t['ticker']} "
+                    f"[{t['amount_range']}] delay={t['delay_days']}d"
+                )
+
+        all_trades = politician_trades.get("trades", [])
+        if all_trades:
+            lines.append("  ALL RECENT TRADES:")
+            for t in all_trades[:20]:
+                lines.append(
+                    f"    {t['politician']} — {t['action'].upper()} {t['ticker']} "
+                    f"({t['amount_range']}) sectors={t['relevant_sectors']}"
+                )
+
+        lines.append("")
+        return "\n".join(lines)
+
+    def analyse(self, themes: list[Theme], run_id: str | None = None,
+                sentiment_report: dict | None = None,
+                politician_trades: dict | None = None) -> list[dict]:
         """
         Run causal analysis for each theme.
         Returns list of thesis dicts and persists to MongoDB.
@@ -161,10 +199,12 @@ Execute all 8 steps of your analytical framework. Output only valid JSON matchin
                 f"  Summary: {sentiment_report.get('summary', '')}\n"
             )
 
+        politician_context = self._format_politician_context(politician_trades)
+
         for theme in themes:
             print(f"[CausalReasoningAgent] Analysing theme: {theme.id}")
             try:
-                crew = self._build_crew(theme, macro_context + sentiment_context)
+                crew = self._build_crew(theme, macro_context + sentiment_context + politician_context)
                 result = crew.kickoff()
 
                 raw_text = str(result)
