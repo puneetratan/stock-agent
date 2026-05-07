@@ -348,12 +348,271 @@ def web_search(query: str) -> list[dict]:
         return [{"error": str(e)}]
 
 
+# ── Congressional trade helpers ───────────────────────────────────────────────
+
+def _senate_session():
+    """Return (requests.Session, csrf_token) with ToS accepted on efdsearch.senate.gov."""
+    import re as _re
+    from html.parser import HTMLParser
+
+    class _CSRFParser(HTMLParser):
+        csrf = None
+        def handle_starttag(self, tag, attrs):
+            if tag == "input":
+                d = dict(attrs)
+                if d.get("name") == "csrfmiddlewaretoken":
+                    self.csrf = d.get("value")
+
+    BASE = "https://efdsearch.senate.gov"
+    s = requests.Session()
+    s.headers["User-Agent"] = "StockAgent/1.0 (research; public STOCK Act data)"
+
+    r = s.get(f"{BASE}/search/home/", timeout=15)
+    p = _CSRFParser()
+    p.feed(r.text)
+    csrf = p.csrf
+    if not csrf:
+        raise ValueError("Could not extract CSRF token from efdsearch.senate.gov")
+
+    s.post(
+        f"{BASE}/search/home/",
+        data={"csrfmiddlewaretoken": csrf, "prohibition_agreement": "1"},
+        headers={"Referer": f"{BASE}/search/home/"},
+        timeout=15,
+    )
+    return s, csrf, BASE
+
+
+def _fetch_senate_ptr_trades(days: int) -> list[dict]:
+    """
+    Fetch Periodic Transaction Report trades from the Senate EFD search.
+    Returns list of raw trade dicts compatible with _enrich().
+    """
+    import re as _re
+    from html.parser import HTMLParser
+    import time
+
+    s, csrf, BASE = _senate_session()
+    start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%m/%d/%Y 00:00:00")
+
+    # Page through PTR filings
+    all_filings = []
+    start = 0
+    batch = 50
+    while True:
+        r = s.post(
+            f"{BASE}/search/report/data/",
+            data={
+                "start": start, "length": batch,
+                "report_types[]": 11,   # 11 = Periodic Transaction Report
+                "submitted_start_date": start_date,
+                "submitted_end_date": "",
+                "candidate_state": "", "senator_state": "",
+                "office_id": "", "first_name": "", "last_name": "",
+            },
+            headers={"X-CSRFToken": csrf, "Referer": f"{BASE}/search/", "X-Requested-With": "XMLHttpRequest"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        data = r.json()
+        rows = data.get("data", [])
+        if not rows:
+            break
+        for row in rows:
+            href_m = _re.search(r'href="(/search/view/ptr/[^"]+)"', row[3])
+            if href_m:
+                all_filings.append({
+                    "senator": f"{row[0]} {row[1]}".strip(),
+                    "filing_date": row[4],
+                    "url": BASE + href_m.group(1),
+                })
+        start += batch
+        if start >= data.get("recordsFiltered", 0):
+            break
+        time.sleep(0.4)
+
+    # Parse each PTR HTML page for individual transactions
+    trades = []
+    for filing in all_filings[:40]:    # cap at 40 filings per run
+        try:
+            r = s.get(filing["url"], timeout=20)
+            r.raise_for_status()
+            trades.extend(_parse_senate_ptr_html(r.text, filing["senator"], filing["filing_date"]))
+            time.sleep(0.3)
+        except Exception as e:
+            logger.warning(f"[MCP:politician] Senate PTR page failed {filing['url']}: {e}")
+    return trades
+
+
+def _parse_senate_ptr_html(html: str, senator: str, filing_date: str) -> list[dict]:
+    """Extract individual transactions from a Senate PTR HTML page."""
+    import re as _re
+
+    trades = []
+    # Find the transaction table rows between <tbody> and </tbody>
+    tbody_m = _re.search(r"<tbody>(.*?)</tbody>", html, _re.DOTALL | _re.IGNORECASE)
+    if not tbody_m:
+        return trades
+
+    row_pattern = _re.compile(r"<tr>(.*?)</tr>", _re.DOTALL | _re.IGNORECASE)
+    td_pattern  = _re.compile(r"<td[^>]*>(.*?)</td>", _re.DOTALL | _re.IGNORECASE)
+    tag_strip   = _re.compile(r"<[^>]+>")
+
+    for row_m in row_pattern.finditer(tbody_m.group(1)):
+        cells = [tag_strip.sub("", c.group(1)).strip() for c in td_pattern.finditer(row_m.group(1))]
+        if len(cells) < 8:
+            continue
+        ticker = cells[3].strip("- ").upper()
+        if not ticker or ticker == "--":
+            continue
+        trades.append({
+            "senator":            senator,
+            "ticker":             ticker,
+            "asset_description":  cells[4][:120],
+            "type":               cells[6],
+            "amount":             cells[7],
+            "transaction_date":   cells[1],
+            "disclosure_date":    filing_date,
+        })
+    return trades
+
+
+def _fetch_house_ptr_trades(days: int) -> list[dict]:
+    """
+    Fetch House PTR trades:
+      1. Download annual FD.zip XML index from disclosures-clerk.house.gov
+      2. Filter for PTR filings (FilingType=P) within the last `days` days
+      3. Download each PTR PDF and parse it with pdfplumber
+    Returns list of raw trade dicts compatible with _enrich().
+    """
+    import io
+    import re as _re
+    import time
+    import zipfile
+    import xml.etree.ElementTree as ET
+    import pdfplumber
+
+    BASE    = "https://disclosures-clerk.house.gov"
+    HEADERS = {"User-Agent": "StockAgent/1.0 (research; public STOCK Act data)"}
+    cutoff  = datetime.utcnow() - timedelta(days=days)
+    current_year = datetime.utcnow().year
+
+    # Collect PTR filing stubs from this year and last year if near year boundary
+    years = [current_year]
+    if datetime.utcnow().month <= 2:
+        years.append(current_year - 1)
+
+    recent_ptrs = []
+    for year in years:
+        try:
+            r = requests.get(f"{BASE}/public_disc/financial-pdfs/{year}FD.zip", headers=HEADERS, timeout=20)
+            r.raise_for_status()
+            z = zipfile.ZipFile(io.BytesIO(r.content))
+            with z.open(f"{year}FD.xml") as f:
+                root = ET.parse(f).getroot()
+            for member in root:
+                if member.findtext("FilingType", "") != "P":
+                    continue
+                filing_date_str = member.findtext("FilingDate", "")
+                try:
+                    filing_dt = datetime.strptime(filing_date_str, "%m/%d/%Y")
+                except ValueError:
+                    continue
+                if filing_dt < cutoff:
+                    continue
+                first = member.findtext("First", "")
+                last  = member.findtext("Last", "")
+                recent_ptrs.append({
+                    "name":        f"{first} {last}".strip(),
+                    "filing_date": filing_date_str,
+                    "doc_id":      member.findtext("DocID", ""),
+                    "year":        year,
+                })
+        except Exception as e:
+            logger.warning(f"[MCP:politician] House FD index fetch failed for {year}: {e}")
+
+    # Download + parse each PTR PDF
+    trades = []
+    for ptr in recent_ptrs[:30]:    # cap at 30 PDFs per run
+        try:
+            pdf_url = f"{BASE}/public_disc/ptr-pdfs/{ptr['year']}/{ptr['doc_id']}.pdf"
+            r = requests.get(pdf_url, headers=HEADERS, timeout=20)
+            r.raise_for_status()
+            new_trades = _parse_house_ptr_pdf(r.content, ptr["name"], ptr["filing_date"])
+            trades.extend(new_trades)
+            time.sleep(0.3)
+        except Exception as e:
+            logger.warning(f"[MCP:politician] House PDF failed {ptr['doc_id']}: {e}")
+    return trades
+
+
+def _parse_house_ptr_pdf(pdf_bytes: bytes, member_name: str, filing_date: str) -> list[dict]:
+    """
+    Extract stock transactions from a House PTR PDF using regex on the extracted text.
+    Handles the common PTR format where each transaction has:
+      asset name (TICKER) [ST|OT]  transaction_type  MM/DD/YYYY  MM/DD/YYYY  $amount
+    """
+    import io
+    import re as _re
+    import pdfplumber
+
+    trades = []
+    text = ""
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            text += (page.extract_text() or "") + "\n"
+
+    # Each line that has a date and amount is a transaction candidate
+    date_re   = _re.compile(r"\d{2}/\d{2}/\d{4}")
+    amount_re = _re.compile(r"\$[\d,]+\s*(?:-|–)\s*\$[\d,]+|\$[\d,]+\+?")
+    type_re   = _re.compile(r"\b(P|S \(partial\)|S \(full\)|S)\b")
+    # Ticker: (AMZN), (AAPL), NYSEARCA: DIA, NASDAQ: NVDA, etc.
+    ticker_re = _re.compile(
+        r"\(([A-Z]{1,5})\)\s*\[|"         # (AMZN) [ST]
+        r"(?:NYSEARCA|NYSE|NASDAQ):\s*([A-Z]{1,5})\b"  # NYSEARCA: DIA
+    )
+
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        dates   = date_re.findall(line)
+        amounts = amount_re.findall(line)
+        type_m  = type_re.search(line)
+        if not (dates and amounts and type_m):
+            continue
+
+        # Look for ticker in this line and the two lines around it
+        search_window = "\n".join(lines[max(0, i - 1): i + 3])
+        ticker = None
+        for tm in ticker_re.finditer(search_window):
+            ticker = (tm.group(1) or tm.group(2) or "").strip().upper()
+            if ticker:
+                break
+
+        if not ticker:
+            continue
+
+        trades.append({
+            "representative":    member_name,
+            "ticker":            ticker,
+            "type":              type_m.group(1),
+            "amount":            amounts[0],
+            "transaction_date":  dates[0],
+            "disclosure_date":   filing_date,
+            "asset_description": line[:80],
+        })
+    return trades
+
+
 @mcp.tool()
 def get_politician_trades(days: int = 45) -> dict:
     """
-    Fetch recent congressional stock trade disclosures.
-    Free public data — no API key needed.
-    Under STOCK Act: House discloses within 45 days, Senate within 30 days.
+    Fetch recent congressional stock trade disclosures from official government sources.
+
+    Senate: efdsearch.senate.gov JSON API + individual PTR HTML pages
+    House:  disclosures-clerk.house.gov FD zip (XML index) + individual PTR PDFs
+
+    No API key required — all data is public under STOCK Act.
+    House discloses within 45 days; Senate within 30 days.
     Returns trades enriched with committee assignments, disclosure delay,
     signal strength, sector relevance, and clustering detection.
     """
@@ -441,35 +700,27 @@ def get_politician_trades(days: int = 45) -> dict:
             "asset_description": trade.get("asset_description", ""),
         }
 
-    # ── House trades ─────────────────────────────────────────────────────────
+    # ── Senate trades via efdsearch.senate.gov ────────────────────────────────
     try:
-        r = requests.get(
-            "https://house-stock-watcher-data.s3-us-east-2.amazonaws.com"
-            "/data/all_transactions.json",
-            timeout=15,
-        )
-        r.raise_for_status()
-        for t in r.json():
-            enriched = _enrich(t, "house")
-            if enriched:
-                all_trades.append(enriched)
-    except Exception as e:
-        logger.error(f"[MCP:politician] House fetch failed: {e}")
-
-    # ── Senate trades ─────────────────────────────────────────────────────────
-    try:
-        r = requests.get(
-            "https://senate-stock-watcher-data.s3-us-east-2.amazonaws.com"
-            "/api/transactions",
-            timeout=15,
-        )
-        r.raise_for_status()
-        for t in r.json():
+        senate_trades = _fetch_senate_ptr_trades(days)
+        for t in senate_trades:
             enriched = _enrich(t, "senate")
             if enriched:
                 all_trades.append(enriched)
+        logger.info(f"[MCP:politician] Senate raw trades: {len(senate_trades)}")
     except Exception as e:
         logger.error(f"[MCP:politician] Senate fetch failed: {e}")
+
+    # ── House trades via disclosures-clerk.house.gov ──────────────────────────
+    try:
+        house_trades = _fetch_house_ptr_trades(days)
+        for t in house_trades:
+            enriched = _enrich(t, "house")
+            if enriched:
+                all_trades.append(enriched)
+        logger.info(f"[MCP:politician] House raw trades: {len(house_trades)}")
+    except Exception as e:
+        logger.error(f"[MCP:politician] House fetch failed: {e}")
 
     # ── Clustering detection ──────────────────────────────────────────────────
     buy_sector_counts  = Counter(

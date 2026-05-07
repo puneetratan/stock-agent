@@ -761,6 +761,22 @@ v1.1 — 2026-05-03
   narrative_cycles for trend/theme questions; market_data/fundamentals/
   geo_macro for ticker-specific technical/fundamental/geo questions)
 
+v1.4 — 2026-05-07
+  Fixed politician_trades data source — both original S3 endpoints were dead
+
+  mcp_servers/intelligence_mcp.py: replaced dead S3 URLs with official government APIs
+  Senate: efdsearch.senate.gov JSON search API + individual PTR HTML pages
+    — session management: GET CSRF token → POST ToS acceptance → paginate PTR filings
+    — fetch each /search/view/ptr/{uuid}/ HTML page, parse tbody transaction table
+    — handles 50 filings per batch, caps at 40 PTR pages per run
+  House: disclosures-clerk.house.gov FD.zip XML index + individual PTR PDFs
+    — downloads annual FD.zip, parses XML for FilingType=P entries in date window
+    — downloads each PTR PDF, extracts text with pdfplumber (already a transitive dep)
+    — regex-based parser handles common PTR formats: (TICKER) [ST], NYSEARCA: TICKER
+    — caps at 30 PDFs per run; graceful skip on parse failure
+  Both fetchers filter by transaction date via existing _enrich() cutoff logic
+  Tested: Senate returns ~17 enriched trades, House returns ~56 enriched trades (45d window)
+
 v1.3 — 2026-05-04
   Wired get_politician_trades() live data into the pipeline
 
