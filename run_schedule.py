@@ -140,10 +140,8 @@ def main():
     log.info(f"Scheduler starting — will run daily at {run_at} {tz_name}")
     log.info("Keep this process alive (tmux / screen / systemd)")
 
-    # Morning agent run (weekdays at 06:30 ET)
-    utc_morning = _local_to_utc(run_at, tz_name)
-    log.info(f"Morning run scheduled at UTC {utc_morning} (= {run_at} {tz_name})")
-    schedule.every().day.at(utc_morning).do(run_job)
+    # Morning agent run is handled by com.stockintelligence.morning-run launchd job
+    # (uses StartCalendarInterval to wake Mac from sleep at 06:30 ET)
 
     # Nightly verification at 23:00 UTC every day
     schedule.every().day.at("23:00").do(run_verification_job)

@@ -17,6 +17,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+EVAL_MODE = "--eval" in sys.argv   # python ask.py --eval  →  score every answer
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 SYSTEM_PROMPT = """
@@ -329,6 +331,11 @@ def chat():
     print("  Type a question about your signal history.")
     print("  Type 'quit' or 'exit' to stop.")
     print("  Type 'clear' to reset conversation memory.")
+    if EVAL_MODE:
+        print("  Type 'eval history' to see evaluation trend.")
+        print("  [EVAL MODE ON — every answer will be scored by RAGAS]")
+    else:
+        print("  Run with --eval to enable RAGAS hallucination checks.")
     print("=" * 55 + "\n")
 
     # Show quick data health summary
@@ -357,6 +364,10 @@ def chat():
             CONVERSATION_HISTORY.clear()
             print("  [Conversation memory cleared]\n")
             continue
+        if question.lower() == "eval history" and EVAL_MODE:
+            from tools.ragas_eval import print_eval_history
+            print_eval_history()
+            continue
 
         print("\n  Searching your data...", end="", flush=True)
         context = _get_mongo_context(question)
@@ -370,6 +381,15 @@ def chat():
         CONVERSATION_HISTORY.append({"user": question, "assistant": answer})
         if len(CONVERSATION_HISTORY) > MAX_HISTORY:
             CONVERSATION_HISTORY.pop(0)
+
+        # RAGAS evaluation — runs after answer is shown so there's no delay for the user
+        if EVAL_MODE:
+            from tools.ragas_eval import evaluate_answer, save_evaluation, print_evaluation
+            print("  Evaluating answer...", end="", flush=True)
+            result = evaluate_answer(question, answer, context)
+            print("\r" + " " * 25 + "\r", end="")
+            print_evaluation(result)
+            save_evaluation(result, answer)
 
 
 if __name__ == "__main__":

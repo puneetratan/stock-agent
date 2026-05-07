@@ -282,6 +282,17 @@ def main():
         print(f"  → Market Regime: {report.market_regime.label}")
 
     # -----------------------------------------------------------------------
+    # Step 6.5: Output Validation — catch hallucinations before delivery
+    # -----------------------------------------------------------------------
+    print("\n[STEP 6.5] Output Validation")
+    try:
+        from tools.output_validator import validate_run, print_validation_report
+        val_report = validate_run(run_id=run_id)
+        print_validation_report(val_report)
+    except Exception as e:
+        print(f"  [WARNING] Validator failed: {e} — continuing to delivery")
+
+    # -----------------------------------------------------------------------
     # Step 7: Deliver report
     # -----------------------------------------------------------------------
     print("\n[STEP 7] Delivering Report")

@@ -24,6 +24,8 @@ class Collections:
     POLITICIAN_TRADES = "politician_trades"
     SKILL_SUGGESTIONS = "skill_suggestions"
     DELIVERY_LOG = "delivery_log"
+    VALIDATION_RESULTS = "validation_results"
+    RAG_EVALUATIONS    = "rag_evaluations"
 
 
 # Every document written by agents carries these top-level fields.
@@ -90,4 +92,8 @@ def ensure_indexes() -> None:
         IndexModel([("politician", ASCENDING)]),
         IndexModel([("signal_strength", ASCENDING)]),
         IndexModel([("fetched_at", DESCENDING)]),
+    ])
+    db[Collections.VALIDATION_RESULTS].create_indexes([
+        IndexModel([("run_id", ASCENDING)]),
+        IndexModel([("validated_at", DESCENDING)]),
     ])

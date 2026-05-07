@@ -207,6 +207,57 @@ def get_status():
     }
 
 
+def get_step_logs(step_key: str, max_lines: int = 150) -> list[str]:
+    """Return log lines belonging to a specific pipeline step."""
+    try:
+        with open(STATE_FILE) as f:
+            state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return ["[no active run state found]"]
+
+    log_file = state.get("log_file", "")
+    if not log_file:
+        return ["[no log file in state]"]
+
+    # Collect the marker for this step and all subsequent step markers
+    step_marker = None
+    next_markers = []
+    found = False
+
+    for key, marker, *_ in STEPS:
+        if key == step_key:
+            step_marker = marker
+            found = True
+        elif found:
+            next_markers.append(marker)
+
+    if step_marker is None:
+        return [f"[unknown step: {step_key}]"]
+
+    lines = []
+    in_step = False
+
+    try:
+        with open(log_file) as f:
+            for line in f:
+                line = line.rstrip("\n")
+                if step_marker in line:
+                    in_step = True
+                elif in_step and next_markers and any(m in line for m in next_markers):
+                    break
+                if in_step and line.strip():
+                    lines.append(line)
+    except FileNotFoundError:
+        return [f"[log file not found: {os.path.basename(log_file)}]"]
+    except IOError as e:
+        return [f"[error reading log: {e}]"]
+
+    if not lines:
+        return ["[no log lines for this step yet — check back when the step is running]"]
+
+    return lines[-max_lines:]
+
+
 VENV_PYTHON  = os.path.join(BASE_DIR, ".venv", "bin", "python")
 AGENT_SCRIPT = os.path.join(BASE_DIR, "run_agent.py")
 
@@ -246,6 +297,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/status":
             self._json(200, get_status())
+
+        elif self.path.startswith("/logs"):
+            from urllib.parse import urlparse, parse_qs
+            params = parse_qs(urlparse(self.path).query)
+            step = params.get("step", [""])[0]
+            self._json(200, {"lines": get_step_logs(step)})
 
         elif self.path in ("/", "/index.html"):
             try:
