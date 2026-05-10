@@ -9,11 +9,14 @@ import requests
 
 def _render_html(report: dict) -> str:
     """Convert final report dict to an HTML email body."""
+    if not report:
+        return "<html><body><p>No report generated for this run.</p></body></html>"
+    regime = (report.get("market_regime") or {})
     lines = [
         "<html><body>",
         f"<h1>Stock Intelligence Report — {report.get('generated_at', '')[:10]}</h1>",
         f"<p><b>Run ID:</b> {report.get('run_id', '')}</p>",
-        f"<p><b>Market Regime:</b> {report.get('market_regime', {}).get('label', 'N/A')}</p>",
+        f"<p><b>Market Regime:</b> {regime.get('label', 'N/A')}</p>",
         f"<p><b>Causal Summary:</b> {report.get('causal_summary', '')}</p>",
         "<hr/>",
     ]
@@ -117,27 +120,34 @@ def _deliver_terminal(report: dict) -> None:
     print(json.dumps(report, indent=2))
 
 
-def _already_delivered(run_id: str) -> bool:
-    """Return True if this run_id was already delivered. Marks it as delivered on first call."""
+def _check_delivered(run_id: str) -> bool:
+    """Read-only check — returns True if this run_id is already in delivery_log."""
     if not run_id:
         return False
     try:
         from db import get_collection
         from db.collections import Collections
-        col = get_collection(Collections.DELIVERY_LOG)
-        result = col.find_one_and_update(
-            {"run_id": run_id},
-            {"$setOnInsert": {"run_id": run_id, "delivered_at": __import__("datetime").datetime.utcnow()}},
-            upsert=True,
-            return_document=False,  # returns the doc BEFORE the update (None = was not there)
-        )
-        if result is not None:
-            print(f"[delivery] Skipping — run {run_id[:8]} already delivered")
-            return True
-        return False
+        return get_collection(Collections.DELIVERY_LOG).find_one({"run_id": run_id}) is not None
     except Exception as e:
         print(f"[delivery] delivery_log check failed ({e}) — proceeding with delivery")
         return False
+
+
+def _mark_delivered(run_id: str) -> None:
+    """Write delivery_log entry — called only AFTER successful send."""
+    if not run_id:
+        return
+    try:
+        import datetime as _dt
+        from db import get_collection
+        from db.collections import Collections
+        get_collection(Collections.DELIVERY_LOG).update_one(
+            {"run_id": run_id},
+            {"$set": {"run_id": run_id, "delivered_at": _dt.datetime.utcnow()}},
+            upsert=True,
+        )
+    except Exception as e:
+        print(f"[delivery] delivery_log mark failed ({e})")
 
 
 def deliver_report(report: dict, method: str | None = None) -> None:
@@ -146,8 +156,9 @@ def deliver_report(report: dict, method: str | None = None) -> None:
     Guaranteed to send exactly ONE email per run_id regardless of how many
     scripts call this (run_agent, resume_from_ticker, finalize_run).
     """
-    run_id = report.get("run_id", "")
-    if _already_delivered(run_id):
+    run_id = report.get("run_id", "") if report else ""
+    if _check_delivered(run_id):
+        print(f"[delivery] Skipping — run {run_id[:8]} already delivered")
         return
 
     if method is None:
@@ -171,3 +182,6 @@ def deliver_report(report: dict, method: str | None = None) -> None:
         _deliver_slack(report)
     else:
         _deliver_terminal(report)
+
+    # Mark as delivered only after a successful send
+    _mark_delivered(run_id)

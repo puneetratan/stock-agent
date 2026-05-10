@@ -31,20 +31,51 @@ def _json_default(obj):
 def _repair_json(raw: str) -> dict:
     """
     Best-effort JSON repair for truncated or trailing-comma LLM output.
-    Tries progressively more aggressive fixes until one parses.
+    Strategy:
+      1. Raw as-is
+      2. Strip trailing commas before ] or }
+      3. Truncate at each } from the end (last 500 chars)
+      4. Stack-based close: scan for unclosed brackets and append the matching closers
     """
     import re
 
+    def _close_open_brackets(s: str) -> str:
+        """Walk the string, track open brackets, append closers for any left open."""
+        stack = []
+        in_str = False
+        escape = False
+        for ch in s:
+            if escape:
+                escape = False
+                continue
+            if ch == "\\" and in_str:
+                escape = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch in "{[":
+                stack.append("}" if ch == "{" else "]")
+            elif ch in "}]" and stack and stack[-1] == ch:
+                stack.pop()
+        return s + "".join(reversed(stack))
+
+    clean = re.sub(r",\s*([}\]])", r"\1", raw)
+
     attempts = [
         raw,
-        # Remove trailing commas before ] or }
-        re.sub(r",\s*([}\]])", r"\1", raw),
+        clean,
+        _close_open_brackets(raw.rstrip().rstrip(",")),
+        _close_open_brackets(clean.rstrip()),
     ]
 
-    # Also try truncating at each closing brace from the end
-    for i in range(len(raw) - 1, max(len(raw) - 500, 0), -1):
+    # Also try truncating at each } from end of string
+    for i in range(len(raw) - 1, max(len(raw) - 800, 0), -1):
         if raw[i] == "}":
             attempts.append(raw[: i + 1])
+            attempts.append(_close_open_brackets(re.sub(r",\s*([}\]])", r"\1", raw[: i + 1])))
 
     for attempt in attempts:
         try:

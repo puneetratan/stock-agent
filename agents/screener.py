@@ -49,23 +49,8 @@ GLOBAL_UNIVERSE: list[tuple[str, str, str]] = [
     ("UNP",   "US", "NYSE"),   ("DE",    "US", "NYSE"),   ("LOW",   "US", "NYSE"),
     ("LIN",   "US", "NYSE"),   ("COIN",  "US", "NASDAQ"), ("MSTR",  "US", "NASDAQ"),
 
-    # ── Japan ───────────────────────────────────────────────────────────────
-    ("7203.T",  "JAPAN", "TSE"),   # Toyota
-    ("9984.T",  "JAPAN", "TSE"),   # SoftBank Group
-    ("6758.T",  "JAPAN", "TSE"),   # Sony
-    ("8035.T",  "JAPAN", "TSE"),   # Tokyo Electron
-    ("6861.T",  "JAPAN", "TSE"),   # Keyence
-    ("7974.T",  "JAPAN", "TSE"),   # Nintendo
-    ("6367.T",  "JAPAN", "TSE"),   # Daikin Industries
-    ("7267.T",  "JAPAN", "TSE"),   # Honda
-    ("4519.T",  "JAPAN", "TSE"),   # Chugai Pharmaceutical
-
-    # ── South Korea ─────────────────────────────────────────────────────────
-    ("005930.KS", "KOREA", "KRX"),  # Samsung Electronics
-    ("000660.KS", "KOREA", "KRX"),  # SK Hynix
-    ("051910.KS", "KOREA", "KRX"),  # LG Chem
-    ("035420.KS", "KOREA", "KRX"),  # NAVER
-    ("207940.KS", "KOREA", "KRX"),  # Samsung Biologics
+    # Japan and Korea removed — user preference: no exposure to these markets
+    # (macro intel from WorldIntelligenceAgent still covers them globally)
 
     # ── Taiwan ──────────────────────────────────────────────────────────────
     ("2330.TW",  "TAIWAN", "TWSE"),  # TSMC
@@ -167,7 +152,6 @@ GLOBAL_UNIVERSE: list[tuple[str, str, str]] = [
     ("VALE",  "BRAZIL",      "NYSE"),    # Vale ADR
     ("RIO",   "AUSTRALIA",   "NYSE"),    # Rio Tinto ADR
     ("BP",    "UK",          "NYSE"),    # BP ADR
-    ("SONY",  "JAPAN",       "NYSE"),    # Sony ADR
     ("HDB",   "INDIA",       "NYSE"),    # HDFC Bank ADR
     ("INFY",  "INDIA",       "NYSE"),    # Infosys ADR
     ("WIT",   "INDIA",       "NYSE"),    # Wipro ADR
@@ -183,6 +167,59 @@ _POLYGON_TICKERS  = {t for t, _, e in GLOBAL_UNIVERSE if e in _US_EXCHANGES}
 
 # Flat list for iteration
 SP500_SAMPLE = [t for t, _, _ in GLOBAL_UNIVERSE]
+
+
+def _apply_geo_diversity(
+    stage_c: list[dict],
+    stage_a_fallback: list[dict],
+    min_us: int = 10,
+    max_per_region: int = 8,
+) -> list[dict]:
+    """
+    Enforce geographic diversity on the Stage-C output.
+
+    Rules (match skills/screener.md GEOGRAPHIC DIVERSITY RULE):
+      - At least `min_us` stocks must be US (NYSE/NASDAQ)
+      - At most `max_per_region` stocks from any single non-US region
+
+    Strategy:
+      1. Apply the per-region cap first (drop lowest-scoring excess)
+      2. If US count < min_us, fill from highest Stage-A US stocks not already selected
+    """
+    result: list[dict] = []
+    region_counts: dict[str, int] = {}
+
+    for stock in stage_c:
+        region = stock.get("region", "US")
+        count  = region_counts.get(region, 0)
+        if region != "US" and count >= max_per_region:
+            continue        # drop excess non-US stock (list is sorted by score descending)
+        result.append(stock)
+        region_counts[region] = count + 1
+
+    us_count = region_counts.get("US", 0)
+    if us_count < min_us:
+        selected_tickers = {s["ticker"] for s in result}
+        us_fallbacks = [
+            s for s in stage_a_fallback
+            if s.get("region") == "US" and s["ticker"] not in selected_tickers
+        ]
+        # Sort fallbacks by theme_alignment_score if available, else market_cap
+        us_fallbacks.sort(
+            key=lambda x: (x.get("theme_alignment_score", 0), x.get("market_cap", 0)),
+            reverse=True,
+        )
+        needed = min_us - us_count
+        for stock in us_fallbacks[:needed]:
+            result.append(stock)
+        print(f"[ScreenerAgent] Geo-diversity: added {min(needed, len(us_fallbacks))} US stocks to reach minimum {min_us}")
+
+    final_regions: dict[str, int] = {}
+    for s in result:
+        r = s.get("region", "US")
+        final_regions[r] = final_regions.get(r, 0) + 1
+    print(f"[ScreenerAgent] Geo-diversity final: {dict(sorted(final_regions.items()))}")
+    return result
 
 
 class ScreenerAgent:
@@ -211,9 +248,11 @@ class ScreenerAgent:
 
                 market_cap = results.get("market_cap", 0) or 0
                 is_us = ticker in _POLYGON_TICKERS
-                # Non-US exchanges have lower absolute volume — relax threshold
-                effective_min_vol = min_vol if is_us else min_vol * 0.1
-                effective_min_cap = min_cap if is_us else min_cap * 0.5
+                # Same absolute cap threshold for all regions.
+                # Slight volume relaxation for non-US only because share counts
+                # differ (e.g. Indian NSE trades in lots) — but not 10x.
+                effective_min_vol = min_vol if is_us else min_vol * 0.3
+                effective_min_cap = min_cap
 
                 if price > 0 and volume >= effective_min_vol and market_cap >= effective_min_cap:
                     passed.append({
@@ -396,7 +435,8 @@ Output only valid JSON array — no other text.
         stage_c = self._stage_c_technical(stage_b)
         print(f"[ScreenerAgent] Stage C passed: {len(stage_c)}")
 
-        final = stage_c[: cfg.get("max_candidates", 60)]
+        stage_c_all = stage_c[: cfg.get("max_candidates", 60)]
+        final = _apply_geo_diversity(stage_c_all, stage_a)
 
         # Stamp run_id and persist
         now = datetime.now(timezone.utc).isoformat()

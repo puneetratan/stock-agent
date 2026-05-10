@@ -690,28 +690,51 @@
     } catch { return '—'; }
   }
 
+  /* ── log area: create once, persist across re-renders ── */
+  function ensureLogArea(meta) {
+    const area = document.getElementById('log-area');
+    if (area.dataset.built) return;
+    area.dataset.built = '1';
+    meta.forEach(m => {
+      const outer = document.createElement('div');
+      outer.className = 'log-panel-outer';
+      outer.id = `log-outer-${m.key}`;
+      outer.innerHTML = `
+        <div class="log-panel-header">
+          <span>STEP ${m.label} &mdash; ${m.name}</span>
+          <button class="log-close-btn" onclick="toggleLog('${m.key}')">✕ Close</button>
+        </div>
+        <div class="log-panel-body" id="log-${m.key}"></div>`;
+      area.appendChild(outer);
+    });
+  }
+
   /* ── log panel toggle & fetch ── */
   function toggleLog(stepKey) {
-    const panel = document.getElementById(`log-${stepKey}`);
+    const outer = document.getElementById(`log-outer-${stepKey}`);
     const btn   = document.getElementById(`log-btn-${stepKey}`);
-    if (!panel) return;
 
     if (expandedSteps.has(stepKey)) {
       expandedSteps.delete(stepKey);
-      panel.classList.remove('open');
-      if (btn) btn.classList.remove('open');
+      if (outer) outer.classList.remove('open');
+      if (btn)   btn.classList.remove('open');
     } else {
       expandedSteps.add(stepKey);
-      panel.classList.add('open');
+      if (outer) {
+        outer.classList.add('open');
+        outer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
       if (btn) btn.classList.add('open');
-      panel.innerHTML = '<div class="log-empty">Loading…</div>';
+      const body = document.getElementById(`log-${stepKey}`);
+      if (body) body.innerHTML = '<div class="log-empty">Loading…</div>';
       fetchStepLogs(stepKey);
     }
   }
 
   async function fetchStepLogs(stepKey) {
-    const panel = document.getElementById(`log-${stepKey}`);
-    if (!panel || !panel.classList.contains('open')) return;
+    const body  = document.getElementById(`log-${stepKey}`);
+    const outer = document.getElementById(`log-outer-${stepKey}`);
+    if (!body || !outer || !outer.classList.contains('open')) return;
 
     try {
       const r    = await fetch(`/logs?step=${stepKey}`);
@@ -719,7 +742,7 @@
       const lines = data.lines || [];
 
       if (!lines.length) {
-        panel.innerHTML = '<div class="log-empty">No log lines for this step yet.</div>';
+        body.innerHTML = '<div class="log-empty">No log lines for this step yet.</div>';
         return;
       }
 
@@ -736,96 +759,92 @@
         return `<div class="log-line ${cls}">${s}</div>`;
       }).join('');
 
-      // Keep scroll at bottom if user hasn't scrolled up
-      const atBottom = panel.scrollHeight - panel.scrollTop <= panel.clientHeight + 40;
-      panel.innerHTML = html;
-      if (atBottom) panel.scrollTop = panel.scrollHeight;
+      const atBottom = body.scrollHeight - body.scrollTop <= body.clientHeight + 40;
+      body.innerHTML = html;
+      if (atBottom) body.scrollTop = body.scrollHeight;
 
     } catch (e) {
-      panel.innerHTML = `<div class="log-line err">Could not fetch logs: ${e.message}</div>`;
+      body.innerHTML = `<div class="log-line err">Could not fetch logs: ${e.message}</div>`;
     }
   }
 
-  /* ── build a single pipeline row ── */
-  function buildRow(meta, state, isLast, pipeline) {
-    const key   = meta.key;
-    const label = meta.label;
-    const name  = meta.name;
+  /* ── build one horizontal step column ── */
+  function buildStep(meta, state, isFirst, isLast, prevState, pipeline) {
+    const { key, label, name } = meta;
 
-    // extra metadata for specific steps
-    let metaHtml = '';
-    if (key === 'step1' && pipeline.themes_count != null)
-      metaHtml += `<span class="meta-pill">🌍 ${pipeline.themes_count} themes</span>`;
-    if (key === 'step15')
-      metaHtml += ''; // no sub-data exposed yet
-    if (key === 'step4' && pipeline.candidates_count != null)
-      metaHtml += `<span class="meta-pill">🔎 ${pipeline.candidates_count} candidates</span>`;
-    if (key === 'step6' && pipeline.signals_count != null)
-      metaHtml += `<span class="meta-pill highlight">🏆 ${pipeline.signals_count} signals</span>`;
+    const leftCls  = isFirst ? 'invis' : (prevState === 'done' ? 'done' : '');
+    const rightCls = isLast  ? 'invis' : (state === 'done' ? 'done' : state === 'running' ? 'running' : '');
 
-    // ticker grid for step5
-    let tickerHtml = '';
-    if (key === 'step5') {
-      const done    = pipeline.tickers_done   || [];
-      const current = pipeline.current_ticker;
-      const total   = pipeline.total_tickers;
-
-      if (done.length || current) {
-        tickerHtml = '<div class="ticker-grid">';
-        done.forEach(t => {
-          const cls = t.state === 'error' ? 'error' : t.state === 'timeout' ? 'timeout' : 'done';
-          const icon = t.state === 'done' ? '✓' : t.state === 'timeout' ? '⏱' : '✕';
-          tickerHtml += `<span class="ticker-chip ${cls}">${icon} ${t.ticker}</span>`;
-        });
-        if (current) {
-          tickerHtml += `<span class="ticker-chip running"><span class="spin">⟳</span> ${current}</span>`;
-        }
-        // pending placeholders
-        const shown = done.length + (current ? 1 : 0);
-        if (total && shown < total) {
-          const remaining = total - shown;
-          for (let i = 0; i < Math.min(remaining, 8); i++)
-            tickerHtml += `<span class="ticker-chip pending">···</span>`;
-          if (remaining > 8)
-            tickerHtml += `<span class="ticker-chip pending">+${remaining - 8} more</span>`;
-        }
-        tickerHtml += '</div>';
-        if (total)
-          metaHtml += `<span class="meta-pill">🤖 ${done.length + (current ? 1 : 0)} / ${total} stocks</span>`;
-      }
-    }
-
-    const lineClass  = state === 'done' ? 'done' : state === 'running' ? 'running' : '';
-    const statusIcon = STATUS_ICONS[state] || '·';
+    const statusIcon = STATUS_ICONS[state]  || '·';
     const statusText = STATUS_LABELS[state] || '';
 
+    let countHtml = '';
+    if (key === 'step1' && pipeline.themes_count != null)
+      countHtml = `<div class="step-count">🌍 ${pipeline.themes_count} themes</div>`;
+    else if (key === 'step4' && pipeline.candidates_count != null)
+      countHtml = `<div class="step-count">🔎 ${pipeline.candidates_count}</div>`;
+    else if (key === 'step5' && pipeline.total_tickers != null) {
+      const done = (pipeline.tickers_done || []).length + (pipeline.current_ticker ? 1 : 0);
+      countHtml = `<div class="step-count">🤖 ${done}/${pipeline.total_tickers}</div>`;
+    } else if (key === 'step6' && pipeline.signals_count != null)
+      countHtml = `<div class="step-count hl">🏆 ${pipeline.signals_count}</div>`;
+
+    const isOpen = expandedSteps.has(key);
+
     return `
-      <div class="pipeline-row">
-        <div class="rail">
-          <div class="rail-dot ${state}"></div>
-          ${!isLast ? `<div class="rail-line ${lineClass}"></div>` : ''}
+      <div class="pipeline-col">
+        <div class="h-conn">
+          <div class="h-line ${leftCls}"></div>
+          <div class="h-dot ${state}"></div>
+          <div class="h-line ${rightCls}"></div>
         </div>
         <div class="node-card ${state}">
-          <div class="node-header">
-            <div class="node-left">
-              <span class="step-badge ${state}">STEP ${label}</span>
-              <span class="node-name">${name}</span>
-            </div>
-            <div class="node-right">
-              <div class="node-status ${state}">
-                ${statusIcon} ${statusText}
-              </div>
-              <button class="log-toggle" id="log-btn-${key}"
-                      onclick="toggleLog('${key}')" title="Expand logs">
-                <span class="log-chevron">▶</span> Logs
-              </button>
-            </div>
-          </div>
-          ${metaHtml ? `<div class="node-meta">${metaHtml}</div>` : ''}
-          ${tickerHtml}
-          <div class="log-panel" id="log-${key}"></div>
+          <div class="step-badge ${state}">STEP ${label}</div>
+          <div class="node-name">${name}</div>
+          <div class="node-status ${state}">${statusIcon} ${statusText}</div>
+          ${countHtml}
+          <button class="log-toggle ${isOpen ? 'open' : ''}" id="log-btn-${key}"
+                  onclick="toggleLog('${key}')">
+            <span class="log-chevron">▶</span> Logs
+          </button>
         </div>
       </div>`;
+  }
+
+  /* ── inject ticker chips into step5 log panel ── */
+  function renderStep5Tickers(pipeline) {
+    const body = document.getElementById('log-step5');
+    if (!body) return;
+    const outer = document.getElementById('log-outer-step5');
+    if (!outer || !outer.classList.contains('open')) return;
+
+    const done    = pipeline.tickers_done   || [];
+    const current = pipeline.current_ticker;
+    const total   = pipeline.total_tickers;
+    if (!done.length && !current) return;
+
+    let chips = '<div class="ticker-grid">';
+    done.forEach(t => {
+      const cls  = t.state === 'error' ? 'error' : t.state === 'timeout' ? 'timeout' : 'done';
+      const icon = t.state === 'done' ? '✓' : t.state === 'timeout' ? '⏱' : '✕';
+      chips += `<span class="ticker-chip ${cls}">${icon} ${t.ticker}</span>`;
+    });
+    if (current)
+      chips += `<span class="ticker-chip running"><span class="spin">⟳</span> ${current}</span>`;
+    if (total) {
+      const shown = done.length + (current ? 1 : 0);
+      const remaining = total - shown;
+      for (let i = 0; i < Math.min(remaining, 6); i++)
+        chips += `<span class="ticker-chip pending">···</span>`;
+      if (remaining > 6)
+        chips += `<span class="ticker-chip pending">+${remaining - 6} more</span>`;
+    }
+    chips += '</div>';
+
+    // prepend ticker grid before log lines if not already there
+    const existing = body.querySelector('.ticker-grid');
+    if (existing) existing.outerHTML = chips;
+    else          body.insertAdjacentHTML('afterbegin', chips);
   }
 
   /* ── render full pipeline ── */
@@ -884,26 +903,29 @@
       statusBadge.innerHTML = '<span class="dot pulse"></span> Running';
     }
 
-    // pipeline nodes
+    // build log area panels (idempotent — runs once)
+    ensureLogArea(meta);
+
+    // build horizontal pipeline columns
     let html = '';
+    let prevState = null;
     meta.forEach((m, i) => {
-      const state  = steps[m.key] || 'pending';
-      const isLast = (i === meta.length - 1);
-      html += buildRow(m, state, isLast, pipeline);
+      const state   = steps[m.key] || 'pending';
+      const isFirst = i === 0;
+      const isLast  = i === meta.length - 1;
+      html += buildStep(m, state, isFirst, isLast, prevState, pipeline);
+      prevState = state;
     });
     track.innerHTML = html;
 
-    // Restore any previously expanded log panels
+    // restore Logs button open state (cards were just rebuilt)
     expandedSteps.forEach(stepKey => {
-      const panel = document.getElementById(`log-${stepKey}`);
-      const btn   = document.getElementById(`log-btn-${stepKey}`);
-      if (panel) {
-        panel.classList.add('open');
-        if (btn) btn.classList.add('open');
-      } else {
-        expandedSteps.delete(stepKey);
-      }
+      const btn = document.getElementById(`log-btn-${stepKey}`);
+      if (btn) btn.classList.add('open');
     });
+
+    // keep step5 ticker grid live in its log panel
+    renderStep5Tickers(pipeline);
   }
 
   /* ── render scheduler badge ── */
@@ -957,6 +979,8 @@
             fetchStepLogs(stepKey);
           }
         });
+        if (expandedSteps.has('step5'))
+          renderStep5Tickers(data.pipeline);
       }
 
     } catch (e) {

@@ -35,7 +35,7 @@ models:
   ranking:       "arn:aws:bedrock:us-east-1:597864876332:application-inference-profile/j0088oxmdngr"
 
 schedule:
-  run_at: "06:30"             # HH:MM — before US market open 09:30 ET
+  run_at: "10:30"             # HH:MM — 1hr after US market open; India/Asia sessions already closed
   timezone: "US/Eastern"
   weekdays_only: true
 

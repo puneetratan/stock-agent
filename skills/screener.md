@@ -63,6 +63,30 @@ STAGE C — TECHNICAL MOMENTUM FILTER
     Price above 50-day moving average (uptrend)
     Volume not collapsing (no distribution)
 
+## GEOGRAPHIC DIVERSITY RULE (enforced after Stage C — non-negotiable)
+
+The final candidate list of 20-25 stocks MUST meet all three constraints:
+
+  MINIMUM US exposure:
+    At least 10 stocks must be NYSE or NASDAQ listed
+    (US stocks = region "US" in the universe)
+    If fewer than 10 US stocks pass all three stages, fill from the highest
+    remaining US stocks that passed Stage A, ranked by theme_alignment_score.
+
+  MAXIMUM single-market exposure:
+    At most 8 stocks from any single non-US market
+    This applies per region: India max 8, China max 8, etc.
+    If a region exceeds 8, drop the lowest-scoring stocks from that region
+    until the cap is met.
+
+  Why this rule exists:
+    When a macro theme targets a single country (e.g. "India Safe-Haven"),
+    the theme alignment engine will score ALL stocks from that country highly.
+    Without a cap the final list becomes geographically concentrated, which:
+    - Defeats the purpose of global diversification
+    - Creates correlated risk (one event hurts all picks)
+    - Produces a report that ignores the rest of the world
+
 ## ALSO INCLUDE:
   ETFs as theme proxies:
     When a theme is hot but individual stocks unclear
